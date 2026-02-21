@@ -11,7 +11,11 @@ export type WSMessageType =
   | "screenshot"
   | "error"
   | "browser_state"
-  | "log";
+  | "log"
+  | "conversation_list"
+  | "conversation_switched"
+  | "conversation_created"
+  | "conversation_current";
 
 export interface WSMessage {
   type: WSMessageType;
@@ -147,4 +151,47 @@ export interface SiteKnowledgeSummary {
   flowCount: number;
   tipCount: number;
   issueCount: number;
+}
+
+// ── Conversations ─────────────────────────────────────────────────
+
+export interface ConversationInfo {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  status: "active" | "archived";
+  domain?: string;
+  messageCount: number;
+}
+
+export type ConversationMessageType =
+  | "input" | "info" | "success" | "warn" | "error"
+  | "stream" | "result" | "step" | "agent";
+
+export interface ConversationMessageDTO {
+  id: string;
+  conversationId: string;
+  timestamp: string;
+  role: "user" | "agent" | "system";
+  type: ConversationMessageType;
+  content: string;
+  mode?: string;
+  costUsd?: number;
+  commandId?: string;
+}
+
+export interface ConversationListPayload {
+  conversations: ConversationInfo[];
+  activeId: string;
+}
+
+export interface ConversationSwitchedPayload {
+  conversation: ConversationInfo;
+  messages: ConversationMessageDTO[];
+}
+
+export interface ConversationCurrentPayload {
+  conversation: ConversationInfo;
+  messages: ConversationMessageDTO[];
 }

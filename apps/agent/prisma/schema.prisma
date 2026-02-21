@@ -82,3 +82,26 @@ model TestReport {
   durationMs Int
   costUsd    Float
 }
+
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status    String   @default("active")
+  domain    String?
+}
+
+model ConversationMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  timestamp      DateTime @default(now())
+  role           String
+  type           String
+  content        String
+  mode           String?
+  costUsd        Float?
+  commandId      String?
+
+  @@index([conversationId, timestamp])
+}

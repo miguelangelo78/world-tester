@@ -29,6 +29,13 @@ export type BrowserCommand =
   | { type: "tab_switch"; target: string }
   | { type: "tab_close"; index?: number };
 
+export type ConversationCommand =
+  | { type: "conv_list" }
+  | { type: "conv_new"; title?: string }
+  | { type: "conv_switch"; target: string }
+  | { type: "conv_rename"; title: string }
+  | { type: "conv_archive" };
+
 const PREFIX_MAP: Record<string, CommandMode> = {
   "e:": "extract",
   "a:": "act",
@@ -97,6 +104,40 @@ export function parseBrowserCommand(input: string): BrowserCommand | null {
         ? parseInt(tabCloseMatch[1], 10)
         : undefined,
     };
+  }
+
+  return null;
+}
+
+/**
+ * Try to parse a conversation management command.
+ * Returns null when the input is not a conversation command.
+ */
+export function parseConversationCommand(input: string): ConversationCommand | null {
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower === "conv" || lower === "conversations") {
+    return { type: "conv_list" };
+  }
+
+  const newMatch = trimmed.match(/^conv[:\s]new(?:\s+(.+))?$/i);
+  if (newMatch) {
+    return { type: "conv_new", title: newMatch[1]?.trim() || undefined };
+  }
+
+  const switchMatch = trimmed.match(/^conv[:\s]switch\s+(.+)$/i);
+  if (switchMatch) {
+    return { type: "conv_switch", target: switchMatch[1].trim() };
+  }
+
+  const renameMatch = trimmed.match(/^conv[:\s]rename\s+(.+)$/i);
+  if (renameMatch) {
+    return { type: "conv_rename", title: renameMatch[1].trim() };
+  }
+
+  if (lower === "conv:archive" || lower === "conv archive") {
+    return { type: "conv_archive" };
   }
 
   return null;
@@ -180,6 +221,13 @@ export function getHelpText(): string {
     "  tab:new [url]                 Open a new tab",
     "  tab:switch <index or url>     Switch active tab",
     "  tab:close [index]             Close a tab",
+    "",
+    "Conversation management:",
+    "  conv                          List all conversations",
+    "  conv:new [title]              Create a new conversation (and switch to it)",
+    "  conv:switch <id or index>     Switch to a different conversation",
+    "  conv:rename <title>           Rename the current conversation",
+    "  conv:archive                  Archive the current conversation",
     "",
     "  help          Show this help text",
     "  cost          Show session cost summary",

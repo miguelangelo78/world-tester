@@ -14,6 +14,9 @@ import type {
   BrowserInfo,
   LogPayload,
   ScreenshotPayload,
+  ConversationListPayload,
+  ConversationSwitchedPayload,
+  ConversationCurrentPayload,
 } from "@world-tester/shared";
 
 const PORT = parseInt(process.env.AGENT_PORT ?? "3100", 10);
@@ -24,7 +27,10 @@ function toScreenshotUrl(filePath: string | undefined | null): string | undefine
   return `/screenshots/${encodeURIComponent(basename)}`;
 }
 
-function createWsSink(clients: Set<WebSocket>, commandId?: string): OutputSink {
+import type { MemoryManager } from "./memory/manager.js";
+import type { ConversationMessageType } from "@world-tester/shared";
+
+function createWsSink(clients: Set<WebSocket>, commandId?: string, memory?: MemoryManager): OutputSink {
   function broadcast(msg: WSMessage) {
     const data = JSON.stringify(msg);
     for (const ws of clients) {
@@ -32,30 +38,54 @@ function createWsSink(clients: Set<WebSocket>, commandId?: string): OutputSink {
     }
   }
 
-  return {
+  function persist(type: ConversationMessageType, content: string) {
+    memory?.addConversationMessage({
+      role: "agent",
+      type,
+      content,
+      commandId,
+    });
+  }
+
+  let streamAccum = "";
+
+  const sink: OutputSink & { flushStream(): void } = {
     write(text: string) {
       broadcast({ type: "stream_chunk", id: commandId, payload: { text } });
+      streamAccum += text;
+    },
+    flushStream() {
+      if (streamAccum) {
+        persist("agent", streamAccum.trim());
+        streamAccum = "";
+      }
     },
     info(msg: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "info", message: msg } satisfies LogPayload });
+      persist("info", msg);
     },
     success(msg: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "success", message: msg } satisfies LogPayload });
+      persist("success", msg);
     },
     warn(msg: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "warn", message: msg } satisfies LogPayload });
+      persist("warn", msg);
     },
     error(msg: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "error", message: msg } satisfies LogPayload });
+      persist("error", msg);
     },
     agentMessage(msg: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "agent", message: msg } satisfies LogPayload });
+      persist("agent", msg);
     },
     cost(line: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "info", message: line } satisfies LogPayload });
     },
     modeSwitch(from: string, to: string, instruction: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "info", message: `[${from} -> ${to}] ${instruction}` } satisfies LogPayload });
+      persist("info", `[${from} -> ${to}] ${instruction}`);
     },
     testStep(index: number, total: number, action: string, status: string) {
       broadcast({
@@ -63,14 +93,15 @@ function createWsSink(clients: Set<WebSocket>, commandId?: string): OutputSink {
         id: commandId,
         payload: { index, total, action, status },
       });
+      persist("step", `[${index}/${total}] ${status.toUpperCase()} ${action}`);
     },
-    separator() {
-      // no-op for WebSocket
-    },
+    separator() {},
     log(msg: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "info", message: msg } satisfies LogPayload });
+      persist("info", msg);
     },
   };
+  return sink;
 }
 
 function buildBrowserState(core: AgentCore): BrowserStatePayload {
@@ -338,16 +369,142 @@ async function handleCommand(
     return;
   }
 
+  // Conversation management commands
+  if (lower === "conv" || lower === "conversations" || lower === "conversation:list") {
+    const convs = await core.memory.listConversations();
+    const payload: ConversationListPayload = {
+      conversations: convs,
+      activeId: core.memory.activeConversationId,
+    };
+    broadcast({ type: "conversation_list", id: commandId, payload });
+    const lines = convs.map((c) => {
+      const active = c.id === core.memory.activeConversationId ? " *" : "  ";
+      return `${active} ${c.title} (${c.messageCount} msgs, ${new Date(c.updatedAt).toLocaleDateString()}) [${c.id.slice(0, 8)}]`;
+    });
+    const sink = createWsSink(clients, commandId);
+    sink.info(`${convs.length} conversation(s):\n${lines.join("\n")}`);
+    broadcast({
+      type: "command_result",
+      id: commandId,
+      payload: { message: "OK", success: true, mode: "conv", durationMs: 0 } satisfies CommandResultPayload,
+    });
+    return;
+  }
+
+  const convNewMatch = trimmed.match(/^conv(?:ersation)?[:\s]new(?:\s+(.+))?$/i);
+  if (convNewMatch) {
+    const title = convNewMatch[1]?.trim() || undefined;
+    const { conversation, messages } = await core.createConversation(title);
+    const payload: ConversationSwitchedPayload = { conversation, messages };
+    broadcast({ type: "conversation_switched", id: commandId, payload });
+    const sink = createWsSink(clients, commandId);
+    sink.success(`New conversation: "${conversation.title}"`);
+    broadcast({
+      type: "command_result",
+      id: commandId,
+      payload: { message: "OK", success: true, mode: "conv", durationMs: 0 } satisfies CommandResultPayload,
+    });
+    return;
+  }
+
+  const convSwitchMatch = trimmed.match(/^conv(?:ersation)?[:\s]switch\s+(.+)$/i);
+  if (convSwitchMatch) {
+    const target = convSwitchMatch[1].trim();
+    try {
+      const { conversation, messages } = await core.switchConversation(target);
+      const payload: ConversationSwitchedPayload = { conversation, messages };
+      broadcast({ type: "conversation_switched", id: commandId, payload });
+      const sink = createWsSink(clients, commandId);
+      sink.success(`Switched to: "${conversation.title}" (${messages.length} messages)`);
+    } catch (err) {
+      const sink = createWsSink(clients, commandId);
+      sink.error(err instanceof Error ? err.message : String(err));
+    }
+    broadcast({
+      type: "command_result",
+      id: commandId,
+      payload: { message: "OK", success: true, mode: "conv", durationMs: 0 } satisfies CommandResultPayload,
+    });
+    return;
+  }
+
+  const convRenameMatch = trimmed.match(/^conv(?:ersation)?[:\s]rename\s+(.+)$/i);
+  if (convRenameMatch) {
+    const newTitle = convRenameMatch[1].trim();
+    await core.memory.renameConversation(core.memory.activeConversationId, newTitle);
+    const sink = createWsSink(clients, commandId);
+    sink.success(`Conversation renamed to: "${newTitle}"`);
+    broadcast({
+      type: "command_result",
+      id: commandId,
+      payload: { message: "OK", success: true, mode: "conv", durationMs: 0 } satisfies CommandResultPayload,
+    });
+    return;
+  }
+
+  const convArchiveMatch = trimmed.match(/^conv(?:ersation)?[:\s]archive$/i);
+  if (convArchiveMatch) {
+    const oldId = core.memory.activeConversationId;
+    await core.memory.archiveConversation(oldId);
+    const messages = await core.memory.getConversationMessages(core.memory.activeConversationId);
+    const conversation = (await core.memory.getActiveConversation())!;
+    const payload: ConversationSwitchedPayload = { conversation, messages };
+    broadcast({ type: "conversation_switched", id: commandId, payload });
+    const sink = createWsSink(clients, commandId);
+    sink.success(`Conversation archived. Now on: "${conversation.title}"`);
+    broadcast({
+      type: "command_result",
+      id: commandId,
+      payload: { message: "OK", success: true, mode: "conv", durationMs: 0 } satisfies CommandResultPayload,
+    });
+    return;
+  }
+
+  if (lower === "conversation:current" || lower === "__get_conversation") {
+    const conversation = await core.memory.getActiveConversation();
+    if (conversation) {
+      const messages = await core.memory.getConversationMessages(conversation.id);
+      const payload: ConversationCurrentPayload = { conversation, messages };
+      broadcast({ type: "conversation_current", id: commandId, payload });
+    }
+    broadcast({
+      type: "command_result",
+      id: commandId,
+      payload: { message: "OK", success: true, mode: "conv", durationMs: 0 } satisfies CommandResultPayload,
+    });
+    return;
+  }
+
   // Standard agent commands
   const startTime = Date.now();
   const command = parseCommand(trimmed);
-  const commandSink = createWsSink(clients, commandId);
+  const commandSink = createWsSink(clients, commandId, core.memory);
+
+  // Persist user input and auto-title conversation
+  core.memory.addConversationMessage({
+    role: "user",
+    type: "input",
+    content: trimmed,
+    mode: command.mode,
+    commandId,
+  });
+  core.memory.autoTitleConversation(trimmed).then(async (changed) => {
+    if (!changed) return;
+    const convs = await core.memory.listConversations();
+    const payload: ConversationListPayload = {
+      conversations: convs,
+      activeId: core.memory.activeConversationId ?? "",
+    };
+    broadcast({ type: "conversation_list", id: commandId, payload });
+  }).catch(() => {});
+
   try {
     await core.orchestrator.execute(command, commandSink);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     commandSink.error(`Command failed: ${msg}`);
   }
+  commandSink.flushStream();
   broadcast({ type: "stream_end", id: commandId, payload: {} });
   const durationMs = Date.now() - startTime;
 
@@ -435,16 +592,47 @@ async function main() {
 
   const wss = new WebSocketServer({ server: httpServer });
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", async (ws) => {
     clients.add(ws);
     console.log(`[agent-server] Client connected (${clients.size} total)`);
 
-    // Send initial state
-    const stateMsg: WSMessage = {
+    // Send initial browser state
+    ws.send(JSON.stringify({
       type: "browser_state",
       payload: buildBrowserState(core),
-    };
-    ws.send(JSON.stringify(stateMsg));
+    } satisfies WSMessage));
+
+    // Send initial cost/billing state
+    try {
+      const session = core.costTracker.getSessionTotal();
+      const billing = core.costTracker.getBillingCycleTotal();
+      ws.send(JSON.stringify({
+        type: "cost_update",
+        payload: {
+          action: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+          session,
+          billing: {
+            costUsd: billing.costUsd,
+            inputTokens: billing.inputTokens,
+            outputTokens: billing.outputTokens,
+            sessionCount: billing.sessionCount,
+            cycleStart: billing.cycleStart,
+          },
+        } satisfies CostUpdatePayload,
+      } satisfies WSMessage));
+    } catch { /* non-fatal */ }
+
+    // Send current conversation + message history for replay
+    try {
+      const conversation = await core.memory.getActiveConversation();
+      if (conversation) {
+        const messages = await core.memory.getConversationMessages(conversation.id);
+        ws.send(JSON.stringify({
+          type: "conversation_current",
+          payload: { conversation, messages } satisfies ConversationCurrentPayload,
+        }));
+      }
+    } catch { /* non-fatal */ }
 
     ws.on("message", async (data) => {
       let msg: WSMessage;

@@ -14,9 +14,16 @@ import {
   PanelLeftOpen,
   Menu,
   X,
+  Plus,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
+  Archive,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgent } from "./agent-provider";
+import type { ConversationInfo } from "@world-tester/shared";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: Terminal },
@@ -93,6 +100,196 @@ export function MobileMenuButton() {
   );
 }
 
+function ConversationList({ collapsed }: { collapsed: boolean }) {
+  const {
+    conversations, activeConversationId, status,
+    switchConversation, createConversation, renameConversation, archiveConversation, refreshConversations,
+  } = useAgent();
+
+  const [contextMenu, setContextMenu] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+
+  useEffect(() => {
+    if (status === "connected") {
+      refreshConversations();
+    }
+  }, [status, refreshConversations]);
+
+  const handleNew = () => {
+    createConversation();
+    setTimeout(refreshConversations, 500);
+  };
+
+  const handleSwitch = (id: string) => {
+    if (id === activeConversationId) return;
+    switchConversation(id);
+    setTimeout(refreshConversations, 500);
+  };
+
+  const startRename = (conv: ConversationInfo) => {
+    setEditingId(conv.id);
+    setEditTitle(conv.title);
+    setContextMenu(null);
+  };
+
+  const submitRename = () => {
+    if (editingId && editTitle.trim()) {
+      renameConversation(editingId, editTitle.trim());
+      setTimeout(refreshConversations, 500);
+    }
+    setEditingId(null);
+  };
+
+  const handleArchive = (id: string) => {
+    archiveConversation(id);
+    setContextMenu(null);
+    setTimeout(refreshConversations, 500);
+  };
+
+  if (collapsed) {
+    return (
+      <div className="border-b border-border px-1 py-2 flex flex-col items-center gap-1">
+        <button
+          onClick={handleNew}
+          title="New Conversation"
+          className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+        {conversations.slice(0, 5).map((conv) => (
+          <button
+            key={conv.id}
+            onClick={() => handleSwitch(conv.id)}
+            title={conv.title}
+            className={cn(
+              "rounded p-1.5 transition-colors",
+              conv.id === activeConversationId
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+            )}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-b border-border px-2 py-2">
+      <div className="flex items-center justify-between mb-1.5 px-1">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Conversations
+        </span>
+        <button
+          onClick={handleNew}
+          title="New Conversation"
+          className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+        {conversations.map((conv) => {
+          const isActive = conv.id === activeConversationId;
+          const isEditing = editingId === conv.id;
+
+          return (
+            <div key={conv.id} className="relative group">
+              {isEditing ? (
+                <input
+                  autoFocus
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onBlur={submitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitRename();
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  className="w-full rounded px-2 py-1.5 text-xs bg-muted text-foreground outline-none border border-primary/50"
+                />
+              ) : (
+                <div
+                  className={cn(
+                    "flex items-center rounded transition-colors",
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  )}
+                >
+                  <button
+                    onClick={() => handleSwitch(conv.id)}
+                    className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 text-xs text-left"
+                  >
+                    <MessageSquare className="h-3 w-3 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate">{conv.title}</div>
+                      <div className="flex items-center gap-1 text-[9px] opacity-60">
+                        {conv.domain && (
+                          <>
+                            <Globe className="h-2 w-2" />
+                            <span className="truncate">{conv.domain}</span>
+                          </>
+                        )}
+                        <span>{conv.messageCount} msgs</span>
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (contextMenu === conv.id) {
+                        setContextMenu(null);
+                      } else {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setMenuPos({ top: rect.bottom + 2, left: rect.right - 128 });
+                        setContextMenu(conv.id);
+                      }
+                    }}
+                    className="shrink-0 px-1 py-1.5 rounded-r opacity-0 group-hover:opacity-100 cursor-pointer"
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                </div>
+              )}
+
+              {contextMenu === conv.id && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
+                  <div
+                    className="fixed z-50 w-32 rounded-md border border-border bg-card shadow-lg text-xs overflow-hidden"
+                    style={{ top: menuPos.top, left: Math.max(8, menuPos.left) }}
+                  >
+                    <button
+                      onClick={() => startRename(conv)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent text-left"
+                    >
+                      <Pencil className="h-3 w-3" /> Rename
+                    </button>
+                    <button
+                      onClick={() => handleArchive(conv.id)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent text-left text-destructive"
+                    >
+                      <Archive className="h-3 w-3" /> Archive
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+        {conversations.length === 0 && (
+          <div className="text-[10px] text-muted-foreground/60 px-2 py-1">
+            No conversations yet
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const { status } = useAgent();
@@ -127,6 +324,7 @@ export function Sidebar() {
           )}
         </button>
       </div>
+      <ConversationList collapsed={collapsed} />
       <nav className="flex-1 space-y-1 px-2 py-3">
         {navItems.map((item) => {
           const active = pathname === item.href;
@@ -198,6 +396,7 @@ export function Sidebar() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+            <ConversationList collapsed={false} />
             <nav className="flex-1 space-y-1 px-2 py-3">
               {navItems.map((item) => {
                 const active = pathname === item.href;

@@ -4,7 +4,10 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "re
 import { Send, Loader2 } from "lucide-react";
 import { useAgent } from "./agent-provider";
 import { MarkdownRenderer } from "./markdown-renderer";
-import type { WSMessage, LogPayload, StreamChunkPayload, StepUpdatePayload } from "@world-tester/shared";
+import type {
+  WSMessage, LogPayload, StreamChunkPayload, StepUpdatePayload,
+  ConversationSwitchedPayload, ConversationCurrentPayload, ConversationMessageDTO,
+} from "@world-tester/shared";
 
 interface LogEntry {
   id: string;
@@ -14,7 +17,7 @@ interface LogEntry {
 }
 
 export function CommandTerminal() {
-  const { status, sendCommand, onMessage } = useAgent();
+  const { status, sendCommand, onMessage, requestConversationReplay } = useAgent();
   const [input, setInput] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -44,7 +47,29 @@ export function CommandTerminal() {
     ]);
   }, []);
 
+  const replayMessages = useCallback((messages: ConversationMessageDTO[]) => {
+    const typeMap: Record<string, LogEntry["type"]> = {
+      input: "input",
+      info: "info",
+      success: "success",
+      warn: "warn",
+      error: "error",
+      stream: "stream",
+      result: "result",
+      step: "step",
+      agent: "agent",
+    };
+    const entries: LogEntry[] = messages.map((m) => ({
+      id: m.id,
+      type: typeMap[m.type] ?? "info",
+      text: m.type === "input" ? `> ${m.content}` : m.content,
+      timestamp: new Date(m.timestamp).getTime(),
+    }));
+    setLogs(entries);
+  }, []);
+
   const shownWelcome = useRef(false);
+  const requestedReplay = useRef(false);
   useEffect(() => {
     if (status === "connected" && !shownWelcome.current) {
       shownWelcome.current = true;
@@ -64,9 +89,37 @@ export function CommandTerminal() {
     }
   }, [status, addLog]);
 
+  useEffect(() => {
+    if (status === "connected" && !requestedReplay.current) {
+      requestedReplay.current = true;
+      requestConversationReplay();
+    }
+  }, [status, requestConversationReplay]);
+
   // Listen for messages from the agent
   useEffect(() => {
     return onMessage((msg: WSMessage) => {
+      // Conversation switch: full replacement (user explicitly changed conversation)
+      if (msg.type === "conversation_switched") {
+        const p = msg.payload as ConversationSwitchedPayload;
+        replayMessages(p.messages);
+        setBusy(false);
+        activeCommandId.current = null;
+        streamBuf.current = "";
+        return;
+      }
+      // Conversation current: replace logs with DB state, but skip if a command is running
+      if (msg.type === "conversation_current") {
+        if (activeCommandId.current) return;
+        const p = msg.payload as ConversationCurrentPayload;
+        if (p.messages.length > 0) {
+          replayMessages(p.messages);
+        }
+        return;
+      }
+
+      // Filter out messages from other commands (e.g. replay requests)
+      if (msg.id && msg.id === "__replay__") return;
       if (msg.id && msg.id !== activeCommandId.current) return;
 
       switch (msg.type) {
@@ -78,7 +131,6 @@ export function CommandTerminal() {
         case "stream_chunk": {
           const p = msg.payload as StreamChunkPayload;
           streamBuf.current += p.text;
-          // Update the last stream entry or add a new one
           setLogs((prev) => {
             const last = prev[prev.length - 1];
             if (last?.type === "stream") {
@@ -126,7 +178,7 @@ export function CommandTerminal() {
         }
       }
     });
-  }, [onMessage, addLog]);
+  }, [onMessage, addLog, replayMessages]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = input.trim();

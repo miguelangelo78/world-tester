@@ -5,16 +5,193 @@ import {
   Learning,
   SessionEntry,
 } from "./types.js";
+import type {
+  ConversationInfo,
+  ConversationMessageDTO,
+  ConversationMessageType,
+} from "@world-tester/shared";
+
+export interface AddMessageInput {
+  role: "user" | "agent" | "system";
+  type: ConversationMessageType;
+  content: string;
+  mode?: string;
+  costUsd?: number;
+  commandId?: string;
+}
 
 export class MemoryManager {
   private sessionId: string;
+  private _activeConversationId = "";
 
   constructor(_dataDir: string) {
     this.sessionId = Date.now().toString(36);
   }
 
+  get activeConversationId(): string {
+    return this._activeConversationId;
+  }
+
   async init(): Promise<void> {
-    // Prisma handles table creation via `prisma db push`; nothing to do here.
+    // Resume latest active conversation or create a default one
+    const latest = await prisma.conversation.findFirst({
+      where: { status: "active" },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    if (latest) {
+      this._activeConversationId = latest.id;
+    } else {
+      const conv = await this.createConversation("Default Conversation");
+      this._activeConversationId = conv.id;
+    }
+  }
+
+  // --- Conversations ---
+
+  async createConversation(title?: string): Promise<ConversationInfo> {
+    const row = await prisma.conversation.create({
+      data: { title: title ?? "New Conversation" },
+    });
+    this._activeConversationId = row.id;
+    return this.toConversationInfo(row, 0);
+  }
+
+  async listConversations(): Promise<ConversationInfo[]> {
+    const rows = await prisma.conversation.findMany({
+      where: { status: "active" },
+      orderBy: { updatedAt: "desc" },
+    });
+    const counts = await prisma.conversationMessage.groupBy({
+      by: ["conversationId"],
+      _count: true,
+      where: { conversationId: { in: rows.map((r) => r.id) } },
+    });
+    const countMap = new Map(counts.map((c) => [c.conversationId, c._count]));
+    return rows.map((r) => this.toConversationInfo(r, countMap.get(r.id) ?? 0));
+  }
+
+  async switchConversation(id: string): Promise<ConversationMessageDTO[]> {
+    const conv = await prisma.conversation.findUnique({ where: { id } });
+    if (!conv || conv.status !== "active") {
+      throw new Error(`Conversation "${id}" not found or archived`);
+    }
+    this._activeConversationId = id;
+    return this.getConversationMessages(id);
+  }
+
+  async renameConversation(id: string, title: string): Promise<void> {
+    await prisma.conversation.update({ where: { id }, data: { title } });
+  }
+
+  async archiveConversation(id: string): Promise<void> {
+    await prisma.conversation.update({ where: { id }, data: { status: "archived" } });
+    if (this._activeConversationId === id) {
+      const next = await prisma.conversation.findFirst({
+        where: { status: "active", id: { not: id } },
+        orderBy: { updatedAt: "desc" },
+      });
+      if (next) {
+        this._activeConversationId = next.id;
+      } else {
+        const created = await this.createConversation("New Conversation");
+        this._activeConversationId = created.id;
+      }
+    }
+  }
+
+  async getConversationMessages(id: string, limit = 500): Promise<ConversationMessageDTO[]> {
+    const rows = await prisma.conversationMessage.findMany({
+      where: { conversationId: id },
+      orderBy: { timestamp: "asc" },
+      take: limit,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      conversationId: r.conversationId,
+      timestamp: r.timestamp.toISOString(),
+      role: r.role as ConversationMessageDTO["role"],
+      type: r.type as ConversationMessageType,
+      content: r.content,
+      mode: r.mode ?? undefined,
+      costUsd: r.costUsd ?? undefined,
+      commandId: r.commandId ?? undefined,
+    }));
+  }
+
+  async getActiveConversation(): Promise<ConversationInfo | null> {
+    if (!this._activeConversationId) return null;
+    const row = await prisma.conversation.findUnique({
+      where: { id: this._activeConversationId },
+    });
+    if (!row) return null;
+    const count = await prisma.conversationMessage.count({
+      where: { conversationId: row.id },
+    });
+    return this.toConversationInfo(row, count);
+  }
+
+  addConversationMessage(msg: AddMessageInput): void {
+    if (!this._activeConversationId) return;
+    const convId = this._activeConversationId;
+    prisma.conversationMessage
+      .create({
+        data: {
+          conversationId: convId,
+          role: msg.role,
+          type: msg.type,
+          content: msg.content,
+          mode: msg.mode ?? null,
+          costUsd: msg.costUsd ?? null,
+          commandId: msg.commandId ?? null,
+        },
+      })
+      .then(() =>
+        prisma.conversation.update({
+          where: { id: convId },
+          data: { updatedAt: new Date() },
+        }),
+      )
+      .catch(() => {});
+  }
+
+  async autoTitleConversation(firstCommand: string): Promise<boolean> {
+    if (!this._activeConversationId) return false;
+    const conv = await prisma.conversation.findUnique({
+      where: { id: this._activeConversationId },
+    });
+    if (!conv) return false;
+    const isDefault = conv.title === "New Conversation" || conv.title === "Default Conversation";
+    if (!isDefault) return false;
+    const title = firstCommand.slice(0, 60).trim() || "Untitled";
+    await prisma.conversation.update({
+      where: { id: this._activeConversationId },
+      data: { title },
+    });
+    return true;
+  }
+
+  async setConversationDomain(domain: string): Promise<void> {
+    if (!this._activeConversationId) return;
+    await prisma.conversation.update({
+      where: { id: this._activeConversationId },
+      data: { domain },
+    }).catch(() => {});
+  }
+
+  private toConversationInfo(
+    row: { id: string; title: string; createdAt: Date; updatedAt: Date; status: string; domain: string | null },
+    messageCount: number,
+  ): ConversationInfo {
+    return {
+      id: row.id,
+      title: row.title,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      status: row.status as ConversationInfo["status"],
+      domain: row.domain ?? undefined,
+      messageCount,
+    };
   }
 
   // --- Site Knowledge ---
@@ -140,21 +317,35 @@ export class MemoryManager {
         },
       });
     } catch (err: unknown) {
-      // Unique constraint violation = duplicate, silently ignore
       const code = (err as { code?: string }).code;
       if (code === "P2002") return;
       throw err;
     }
   }
 
-  // --- Session Log ---
+  // --- Legacy Session Log (kept for backward compat) ---
 
   async loadPreviousSession(): Promise<SessionEntry[]> {
+    // Try loading from the active conversation first
+    if (this._activeConversationId) {
+      const msgs = await this.getConversationMessages(this._activeConversationId, 30);
+      if (msgs.length > 0) {
+        return msgs
+          .filter((m) => m.role === "user" || m.role === "agent")
+          .map((m) => ({
+            timestamp: m.timestamp,
+            role: m.role as SessionEntry["role"],
+            content: m.content,
+            mode: m.mode,
+            cost_usd: m.costUsd,
+          }));
+      }
+    }
+    // Fall back to old SessionEntry table
     const rows = await prisma.sessionEntry.findMany({
       orderBy: { timestamp: "desc" },
       take: 20,
     });
-    // Reverse so they're chronological
     rows.reverse();
     return rows.map((r) => ({
       timestamp: r.timestamp.toISOString(),
@@ -166,7 +357,6 @@ export class MemoryManager {
   }
 
   addSessionEntry(entry: Omit<SessionEntry, "timestamp">): void {
-    // Fire-and-forget DB write so it doesn't block the CLI
     prisma.sessionEntry
       .create({
         data: {
@@ -181,9 +371,7 @@ export class MemoryManager {
       .catch(() => {});
   }
 
-  async saveSession(): Promise<void> {
-    // Entries are persisted individually via addSessionEntry — nothing to flush.
-  }
+  async saveSession(): Promise<void> {}
 
   getSessionLog() {
     return {

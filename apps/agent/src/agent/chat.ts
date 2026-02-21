@@ -4,6 +4,7 @@ import { SiteKnowledge, Learning, SessionEntry } from "../memory/types.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import type { BrowserPool } from "../browser/pool.js";
 import type { OutputSink } from "../output-sink.js";
+import type { ConversationMessageDTO } from "@world-tester/shared";
 
 export type ChatAction =
   | "chat" | "task" | "act" | "goto" | "learn" | "extract"
@@ -87,6 +88,20 @@ export function injectSessionContext(entries: SessionEntry[]): void {
     chatHistory.push({
       role: entry.role === "user" ? "user" : "model",
       parts: [{ text: entry.content }],
+    });
+  }
+  sanitizeHistory();
+}
+
+export function loadConversationContext(messages: ConversationMessageDTO[]): void {
+  resetChatHistory();
+  const relevant = messages
+    .filter((m) => m.role === "user" || m.role === "agent")
+    .slice(-30);
+  for (const m of relevant) {
+    chatHistory.push({
+      role: m.role === "user" ? "user" : "model",
+      parts: [{ text: m.content }],
     });
   }
   sanitizeHistory();

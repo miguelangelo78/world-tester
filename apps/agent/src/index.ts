@@ -1,16 +1,17 @@
 import readline from "readline/promises";
 import { stdin as input, stdout as output } from "process";
 import { getCurrentUrl, getDomain } from "./browser/stagehand.js";
-import { parseCommand, parseBrowserCommand, getHelpText } from "./cli/parser.js";
+import { parseCommand, parseBrowserCommand, parseConversationCommand, getHelpText } from "./cli/parser.js";
 import * as display from "./cli/display.js";
 import { createCliSink } from "./cli-sink.js";
 import { createAgentCore } from "./core.js";
+import { loadConversationContext } from "./agent/chat.js";
 
 async function main() {
   display.banner();
 
   const sink = createCliSink();
-  const { config, pool, orchestrator, memory, costTracker, shutdown } =
+  const { config, pool, orchestrator, memory, costTracker, shutdown, switchConversation, createConversation } =
     await createAgentCore(sink);
 
   display.separator();
@@ -107,6 +108,64 @@ async function main() {
             await pool.active().closeTab(browserCmd.index);
             display.success("Tab closed");
             break;
+        }
+      } catch (err) {
+        display.error(err instanceof Error ? err.message : String(err));
+      }
+      continue;
+    }
+
+    // ── Conversation management commands ──
+    const convCmd = parseConversationCommand(trimmed);
+    if (convCmd) {
+      try {
+        switch (convCmd.type) {
+          case "conv_list": {
+            const convs = await memory.listConversations();
+            if (convs.length === 0) {
+              display.info("No conversations yet.");
+            } else {
+              for (const c of convs) {
+                const active = c.id === memory.activeConversationId ? " *" : "  ";
+                console.log(`${active} ${c.title} (${c.messageCount} msgs) [${c.id.slice(0, 8)}]`);
+              }
+            }
+            break;
+          }
+          case "conv_new": {
+            const { conversation } = await createConversation(convCmd.title);
+            display.success(`New conversation: "${conversation.title}"`);
+            break;
+          }
+          case "conv_switch": {
+            // Support switching by partial ID or by list index
+            const convs = await memory.listConversations();
+            let targetId = convCmd.target;
+            const asNum = parseInt(convCmd.target, 10);
+            if (!isNaN(asNum) && asNum >= 0 && asNum < convs.length) {
+              targetId = convs[asNum].id;
+            } else {
+              const match = convs.find((c) => c.id.startsWith(convCmd.target));
+              if (match) targetId = match.id;
+            }
+            const { conversation, messages } = await switchConversation(targetId);
+            display.success(`Switched to: "${conversation.title}" (${messages.length} messages)`);
+            break;
+          }
+          case "conv_rename": {
+            await memory.renameConversation(memory.activeConversationId, convCmd.title);
+            display.success(`Conversation renamed to: "${convCmd.title}"`);
+            break;
+          }
+          case "conv_archive": {
+            const oldId = memory.activeConversationId;
+            await memory.archiveConversation(oldId);
+            const msgs = await memory.getConversationMessages(memory.activeConversationId);
+            loadConversationContext(msgs);
+            const conv = await memory.getActiveConversation();
+            display.success(`Archived. Now on: "${conv?.title ?? "New Conversation"}"`);
+            break;
+          }
         }
       } catch (err) {
         display.error(err instanceof Error ? err.message : String(err));
