@@ -52,6 +52,10 @@ export function modeLabel(mode: string): string {
   return colorFn(`[${mode}]`);
 }
 
+export function modeSwitch(from: string, to: string, instruction: string): void {
+  console.log(chalk.cyan(`[${from} -> ${to}] ${instruction}`));
+}
+
 export function separator(): void {
   console.log(chalk.dim("─".repeat(60)));
 }

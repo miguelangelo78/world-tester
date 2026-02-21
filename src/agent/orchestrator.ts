@@ -16,7 +16,7 @@ import {
   ModeResult,
 } from "./modes.js";
 import { extractPostCommandLearnings, runLearn } from "./learning.js";
-import { runChat } from "./chat.js";
+import { runSmartChat, addToHistory } from "./chat.js";
 
 export class Orchestrator {
   private stagehand: Stagehand;
@@ -88,21 +88,9 @@ export class Orchestrator {
           );
           break;
         case "chat": {
-          const chatResult = await runChat(
-            command.instruction,
-            this.config,
-            siteKnowledge,
-            learnings,
-            getCurrentUrl(),
+          result = await this.runSmartMode(
+            command.instruction, siteKnowledge, learnings,
           );
-          result = {
-            message: chatResult.reply,
-            usage: {
-              input_tokens: chatResult.inputTokens,
-              output_tokens: chatResult.outputTokens,
-            },
-            success: true,
-          };
           break;
         }
         case "learn":
@@ -133,7 +121,8 @@ export class Orchestrator {
     const duration = Date.now() - startTime;
     const costSnapshot = this.costTracker.record(result.usage);
 
-    const isStreamed = command.mode === "chat" ||
+    const isStreamed =
+      (command.mode === "chat" && result.streamed) ||
       (command.mode === "auto" && result.streamed);
     if (!isStreamed) {
       display.agentMessage(result.message);
@@ -196,50 +185,95 @@ export class Orchestrator {
     siteKnowledge: Awaited<ReturnType<MemoryManager["getSiteKnowledge"]>>,
     learnings: Awaited<ReturnType<MemoryManager["getLearnings"]>>,
   ): Promise<ModeResult> {
-    const lower = instruction.toLowerCase();
-
-    if (lower.startsWith("go to ") || lower.startsWith("navigate to ") || lower.startsWith("open ")) {
-      const urlMatch = instruction.match(/https?:\/\/\S+/);
-      if (urlMatch) {
-        return runGoto(this.stagehand, urlMatch[0]);
-      }
+    // Direct URL navigation bypass
+    const urlMatch = instruction.match(/^https?:\/\/\S+$/);
+    if (urlMatch) {
+      return runGoto(this.stagehand, urlMatch[0]);
     }
 
-    // Route conversational/question messages to chat (fast, uses knowledge)
-    const isConversational =
-      /^(hey|hi|hello|yo|thanks|thank you|ok|sure|cool|nice|good|great|awesome)\b/i.test(lower) ||
-      /^(what|how|why|who|where|when|which|is |are |do |does |can |could |would |should |tell me|explain|describe)/i.test(lower) ||
-      lower.endsWith("?");
+    return this.runSmartMode(instruction, siteKnowledge, learnings);
+  }
 
-    if (isConversational) {
-      const chatResult = await runChat(
-        instruction,
-        this.config,
-        siteKnowledge,
-        learnings,
-        getCurrentUrl(),
-      );
+  /**
+   * Shared smart routing: intent classification via chat agent, with handoff to
+   * browser modes when needed. Used by both `c:` (chat) and auto (no prefix).
+   */
+  private async runSmartMode(
+    instruction: string,
+    siteKnowledge: Awaited<ReturnType<MemoryManager["getSiteKnowledge"]>>,
+    learnings: Awaited<ReturnType<MemoryManager["getLearnings"]>>,
+  ): Promise<ModeResult> {
+    const chatResult = await runSmartChat(
+      instruction,
+      this.config,
+      siteKnowledge,
+      learnings,
+      getCurrentUrl(),
+    );
+
+    const classifyCost = {
+      input_tokens: chatResult.inputTokens,
+      output_tokens: chatResult.outputTokens,
+    };
+
+    if (chatResult.action === "chat") {
       return {
-        message: chatResult.reply,
-        usage: {
-          input_tokens: chatResult.inputTokens,
-          output_tokens: chatResult.outputTokens,
-        },
+        message: chatResult.message ?? "",
+        usage: classifyCost,
         success: true,
         streamed: true,
       };
     }
 
-    if (lower.includes("test ") || lower.includes("verify ") || lower.includes("check ") || lower.length > 100) {
-      return runTask(
-        this.stagehand,
-        instruction,
-        this.config,
-        siteKnowledge,
-        learnings,
-      );
+    // Hand off to browser mode
+    const handoffInstruction = chatResult.instruction ?? instruction;
+    display.modeSwitch("chat", chatResult.action, handoffInstruction);
+
+    let browserResult: ModeResult;
+
+    switch (chatResult.action) {
+      case "task":
+        browserResult = await runTask(
+          this.stagehand,
+          handoffInstruction,
+          this.config,
+          siteKnowledge,
+          learnings,
+        );
+        break;
+      case "act":
+        browserResult = await runAct(this.stagehand, handoffInstruction);
+        break;
+      case "goto":
+        browserResult = await runGoto(this.stagehand, handoffInstruction);
+        break;
+      case "learn":
+        browserResult = await runLearn(
+          this.stagehand,
+          this.config,
+          this.memory,
+          handoffInstruction,
+        );
+        break;
+      case "extract":
+        browserResult = await runExtract(this.stagehand, handoffInstruction);
+        break;
+      default:
+        browserResult = await runAct(this.stagehand, handoffInstruction);
     }
 
-    return runAct(this.stagehand, instruction);
+    // Inject the result back into chat history for follow-up conversations
+    const summary = browserResult.success
+      ? `[${chatResult.action} completed] ${browserResult.message.slice(0, 300)}`
+      : `[${chatResult.action} failed] ${browserResult.message.slice(0, 300)}`;
+    addToHistory("model", summary);
+
+    return {
+      ...browserResult,
+      usage: {
+        input_tokens: classifyCost.input_tokens + (browserResult.usage?.input_tokens ?? 0),
+        output_tokens: classifyCost.output_tokens + (browserResult.usage?.output_tokens ?? 0),
+      },
+    };
   }
 }
