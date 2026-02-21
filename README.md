@@ -72,17 +72,46 @@ All commands are entered in the interactive CLI. Prefix your input to select a m
 | `test:`  | Test    | Run a structured QA test with plan, verify, report|
 | _(none)_ | Auto    | Smart routing — agent decides the best approach   |
 
+### Browser targeting
+
+Target a specific browser (and optionally a specific tab) by prefixing with `@name` or `@name:tab`:
+
+```
+@userA t: go to account settings          # run on browser "userA", active tab
+@userA:1 e: extract the page title        # run on browser "userA", tab index 1
+@admin:settings t: change the theme       # run on "admin" browser, tab matching "settings" in URL
+```
+
+### Browser management commands
+
+| Command | Description |
+|---------|-------------|
+| `browser` | List all browsers with their tabs |
+| `browser:spawn <name> [--isolated]` | Launch a new browser instance |
+| `browser:kill <name>` | Close a browser instance |
+| `browser:switch <name>` | Switch the active browser |
+
+### Tab management commands
+
+| Command | Description |
+|---------|-------------|
+| `tab` | List tabs in the active browser |
+| `tab:new [url]` | Open a new tab (optionally navigate to a URL) |
+| `tab:switch <index or url>` | Switch active tab by index or URL fragment |
+| `tab:close [index]` | Close a tab (defaults to active tab) |
+
 ### Built-in commands
 
 - `help` — Show available commands
 - `cost` — Show session and billing cycle cost summary
 - `history` — Show recent task history
 - `knowledge` — Show stored site knowledge and learnings
-- `quit` / `exit` — Close the browser and exit
+- `quit` / `exit` — Close all browsers and exit
 
 ### Examples
 
 ```
+# Basic usage
 > g: https://myapp.com
 > l
 > t: go to account settings and change the display name to "Test User"
@@ -90,11 +119,46 @@ All commands are entered in the interactive CLI. Prefix your input to select a m
 > c: what pages have you learned so far?
 > a: click the dark mode toggle
 > e: get all the form fields on this page
-> ?: what issues have I found on this site before?
-> s: stagehand browser automation docs
+
+# Multi-browser: test that admin changes are visible to a regular user
+> browser:spawn admin --isolated
+> @admin g: https://myapp.com/admin
+> @admin t: create a new user called "TestUser" with role "viewer"
+> browser:spawn viewer --isolated
+> @viewer g: https://myapp.com/login
+> @viewer t: log in as TestUser
+> @viewer e: extract the user's role from the profile page
+
+# Multi-tab: compare two pages side by side
+> tab:new https://myapp.com/settings
+> tab:new https://myapp.com/profile
+> @main:0 e: extract the current theme from settings
+> @main:1 e: extract the display name from profile
+
+# Multi-browser QA test (structured)
+> test: {"title": "Cross-user visibility", "steps": [
+    {"action": "In browser admin, create project X", "expected": "Project created", "critical": true, "browser": "admin"},
+    {"action": "In browser viewer, navigate to projects", "expected": "Project X is visible", "critical": true, "browser": "viewer"}
+  ]}
 ```
 
 ## Features
+
+### Multi-Browser & Multi-Tab
+
+The agent can spawn and manage multiple independent browser instances, each with its own session and profile. Browsers can be isolated (separate cookies/login) or shared.
+
+- **Spawn** browsers on the fly: `browser:spawn userB --isolated`
+- **Target** any browser from any command: `@userB t: log in as admin`
+- **Target a specific tab** within a browser: `@userB:1 e: extract data`
+- **Tabs** within each browser: open, switch, close independently
+- **Smart routing** — the chat agent can also decide to spawn or switch browsers automatically when the task requires it (e.g., "open a new browser as userB")
+- **Test runner** supports per-step browser targeting for cross-browser QA scenarios
+
+This enables testing scenarios like:
+- Verify that changes by user A are visible to user B
+- Test OAuth popup flows across tabs
+- Compare logged-in vs. logged-out views simultaneously
 
 ### Browser Automation (CUA)
 
@@ -145,6 +209,15 @@ Or with structured input:
 > test: {"title": "Risk % update", "steps": [{"action": "Navigate to /account", "expected": "Account Settings page loads", "critical": true}, {"action": "Click Edit on Muay 2", "expected": "Edit modal opens", "critical": true}]}
 ```
 
+Multi-browser test steps can target specific browsers:
+
+```
+> test: {"title": "Cross-user visibility", "steps": [
+    {"action": "Create project X", "expected": "Project created", "critical": true, "browser": "admin"},
+    {"action": "Check projects list", "expected": "Project X visible", "critical": true, "browser": "viewer"}
+  ]}
+```
+
 Critical step failures abort remaining steps. Reports include a console summary and are persisted in the database.
 
 ### Cost Tracking
@@ -171,7 +244,8 @@ src/
 │   ├── parser.ts            # Command prefix parsing
 │   └── display.ts           # Formatted console output
 ├── browser/
-│   └── stagehand.ts         # Chromium launch, Stagehand init, screenshots
+│   ├── pool.ts              # BrowserPool + BrowserInstance (multi-browser/tab management)
+│   └── stagehand.ts         # Chrome launch helpers, Stagehand logger, pool-backed compat layer
 ├── agent/
 │   ├── orchestrator.ts      # Central command dispatcher
 │   ├── modes.ts             # extract, act, task, observe, goto, search, ask
@@ -206,7 +280,8 @@ Filesystem storage is used only for binary/large files:
 ```
 data/
 ├── screenshots/             # Before/after screenshots from test runs
-├── .browser-profile/        # Chromium user data for local runs
+├── .browser-profile/        # Chromium user data for the default "main" browser
+├── .browser-profile-<name>/ # Isolated Chromium profiles for additional browser instances
 └── .browser-profile-docker/ # Chromium user data for Docker runs (separate to avoid lock conflicts)
 ```
 
@@ -259,6 +334,21 @@ Just set `DATABASE_URL` in `.env` pointing to a PostgreSQL instance and run `npm
 ### Cost Principle
 
 Everything is free and open-source except the AI model API. No Browserbase, no paid search APIs (web search happens via in-browser Google navigation), no paid npm packages.
+
+## CLI Prompt
+
+The prompt dynamically shows context:
+
+```
+[https://myapp.com/settings]              # single browser, single tab
+> 
+
+[main|https://myapp.com/settings (2 tabs)] # single browser, multiple tabs
+> 
+
+[admin|https://myapp.com/admin (3 tabs)]   # multiple browsers — shows active browser name
+> 
+```
 
 ## Future Plans
 

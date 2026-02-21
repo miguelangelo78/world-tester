@@ -9,6 +9,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { planTest } from "./test-planner.js";
 import { verifyStep } from "./verify.js";
 import { captureScreenshot, getCurrentUrl, getDomain } from "../browser/stagehand.js";
+import type { BrowserPool } from "../browser/pool.js";
 import {
   saveReport,
   printReportSummary,
@@ -39,6 +40,7 @@ export async function runTest(
   memory: MemoryManager,
   siteKnowledge: SiteKnowledge | null,
   learnings: Learning[],
+  pool?: BrowserPool,
 ): Promise<TestRunResult> {
   const startTime = Date.now();
   let totalUsage: UsageData = { input_tokens: 0, output_tokens: 0 };
@@ -53,11 +55,14 @@ export async function runTest(
     getCurrentUrl(),
   );
 
-  display.info(`Test: ${plan.title} (${plan.steps.length} steps)`);
+  const setupCount = plan.steps.filter((s) => s.setup).length;
+  const assertCount = plan.steps.length - setupCount;
+  display.info(`Test: ${plan.title} (${plan.steps.length} steps — ${setupCount} setup, ${assertCount} assertion)`);
   for (let i = 0; i < plan.steps.length; i++) {
     const s = plan.steps[i];
-    const tag = s.critical ? "critical" : "optional";
-    console.log(`  ${i + 1}. [${tag}] ${s.action}`);
+    const kind = s.setup ? "setup" : s.critical ? "assert" : "optional";
+    const browserTag = s.browser ? ` [${s.browser}]` : "";
+    console.log(`  ${i + 1}. [${kind}]${browserTag} ${s.action}`);
     console.log(`     Expected: ${s.expected}`);
   }
   console.log();
@@ -92,9 +97,14 @@ export async function runTest(
       // Non-fatal
     }
 
+    // Resolve browser: if the step specifies one and we have a pool, use it
+    const stepStagehand = (step.browser && pool?.has(step.browser))
+      ? pool.get(step.browser).stagehand
+      : stagehand;
+
     // Execute
     const execResult = await executeStep(
-      stagehand,
+      stepStagehand,
       step,
       i,
       plan,
@@ -103,6 +113,12 @@ export async function runTest(
       learnings,
     );
     totalUsage = mergeUsage(totalUsage, execResult.usage);
+
+    // Brief wait for SPA content to settle after actions (filters, navigation, etc.)
+    try {
+      const page = stepStagehand.context.pages()[0];
+      if (page) await page.waitForTimeout(1500);
+    } catch { /* non-fatal */ }
 
     // Screenshot after
     let screenshotAfter: string | undefined;
@@ -114,7 +130,7 @@ export async function runTest(
 
     // Verify — pass the CUA's own description as primary evidence
     const verification = await verifyStep(
-      stagehand,
+      stepStagehand,
       config,
       step.action,
       step.expected,
@@ -148,10 +164,29 @@ export async function runTest(
   const passed = results.filter((r) => r.verdict === "pass").length;
   const failed = results.filter((r) => r.verdict === "fail").length;
 
+  // Assertion steps are non-setup steps — these determine the verdict.
+  // Setup steps (navigation, waiting, locating) are prerequisites; their
+  // failure aborts the test but a passing setup step doesn't mean the
+  // test passed.
+  const assertionResults = results.filter((r) => !r.step.setup);
+  const assertionFailed = assertionResults.filter((r) => r.verdict === "fail").length;
+  const assertionPassed = assertionResults.filter((r) => r.verdict === "pass").length;
+  const setupFailed = results.some(
+    (r) => r.verdict === "fail" && r.step.setup,
+  );
+
   let verdict: TestVerdict;
-  if (failed === 0) verdict = "pass";
-  else if (passed === 0) verdict = "fail";
-  else verdict = "partial";
+  if (setupFailed) {
+    verdict = "fail";
+  } else if (assertionResults.length === 0) {
+    verdict = failed === 0 ? "pass" : "fail";
+  } else if (assertionFailed === 0) {
+    verdict = "pass";
+  } else if (assertionPassed === 0) {
+    verdict = "fail";
+  } else {
+    verdict = "partial";
+  }
 
   const totalDuration = Date.now() - startTime;
   const costSnapshot = costTracker.getSessionTotal();

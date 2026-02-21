@@ -55,12 +55,14 @@ function printStepLine(
         ? chalk.red("FAIL")
         : chalk.dim("SKIP");
 
+  const kindTag = step.step.setup ? chalk.dim(" [setup]") : "";
+
   const action =
     step.step.action.length > 70
       ? step.step.action.slice(0, 67) + "..."
       : step.step.action;
 
-  console.log(`  [${index + 1}/${total}] ${icon} ${action}`);
+  console.log(`  [${index + 1}/${total}] ${icon}${kindTag} ${action}`);
 
   if (step.verdict === "fail") {
     console.log(chalk.red(`         Expected: ${step.step.expected}`));

@@ -25,10 +25,21 @@ export async function verifyStep(
   expected: string,
   cuaMessage: string,
 ): Promise<VerifyResult> {
-  // If CUA gave a meaningful description, use it for verification via Gemini Flash
+  // Primary: use the CUA's own report to verify via Gemini Flash
   if (cuaMessage && cuaMessage.length > 20) {
     try {
-      return await verifyViaFlash(config, action, expected, cuaMessage);
+      const flashResult = await verifyViaFlash(config, action, expected, cuaMessage);
+      if (flashResult.passed) return flashResult;
+
+      // Flash said it failed based on the CUA message, but the CUA may have
+      // reported before the page finished updating (e.g., SPA filter/transition).
+      // Double-check by looking at the live page state.
+      try {
+        const liveResult = await verifyViaExtract(stagehand, action, expected);
+        if (liveResult.passed) return liveResult;
+      } catch { /* fall through */ }
+
+      return flashResult;
     } catch {
       // Fall through to extract-based verification
     }
@@ -38,7 +49,6 @@ export async function verifyStep(
   try {
     return await verifyViaExtract(stagehand, action, expected);
   } catch {
-    // Last resort: heuristic from CUA message
     return heuristicVerify(cuaMessage, expected);
   }
 }

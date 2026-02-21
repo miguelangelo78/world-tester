@@ -57,6 +57,12 @@ export function modeSwitch(from: string, to: string, instruction: string): void 
   console.log(chalk.cyan(`[${from} -> ${to}] ${instruction}`));
 }
 
+export function browserLabel(name: string, isActive: boolean): string {
+  return isActive
+    ? chalk.green.bold(`* ${name}`)
+    : chalk.dim(`  ${name}`);
+}
+
 export function testStep(
   index: number,
   total: number,

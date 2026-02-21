@@ -2,6 +2,9 @@ export interface TestStep {
   action: string;
   expected: string;
   critical: boolean;
+  /** Setup steps block on failure but don't affect the pass/fail verdict. */
+  setup?: boolean;
+  browser?: string;
 }
 
 export interface TestPlan {

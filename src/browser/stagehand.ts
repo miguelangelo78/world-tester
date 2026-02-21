@@ -2,14 +2,24 @@ import { spawn, ChildProcess } from "child_process";
 import fs from "fs";
 import path from "path";
 import chalk from "chalk";
-import { Stagehand } from "@browserbasehq/stagehand";
 import { AppConfig } from "../config/types.js";
 import { CostTracker } from "../cost/tracker.js";
+import type { BrowserPool } from "./pool.js";
 
-let instance: Stagehand | null = null;
-let chromeProcess: ChildProcess | null = null;
+let _pool: BrowserPool | null = null;
 
-function findPlaywrightChromium(): string {
+export function setPool(pool: BrowserPool): void {
+  _pool = pool;
+}
+
+function pool(): BrowserPool {
+  if (!_pool) throw new Error("BrowserPool not initialized. Call setPool() first.");
+  return _pool;
+}
+
+// ── Reusable helpers (used by BrowserPool.spawn) ──────────────────────
+
+export function findPlaywrightChromium(): string {
   const cacheDir =
     process.env.PLAYWRIGHT_BROWSERS_PATH ??
     `${process.env.HOME}/.cache/ms-playwright`;
@@ -27,13 +37,18 @@ function findPlaywrightChromium(): string {
   );
 }
 
-function launchChrome(
+export interface LaunchOptions {
+  profileDir: string;
+  headless: boolean;
+}
+
+export function launchChrome(
   executablePath: string,
   config: AppConfig,
+  opts: LaunchOptions,
 ): Promise<{ process: ChildProcess; wsUrl: string }> {
   return new Promise((resolve, reject) => {
-    const profileDir = path.resolve("data", ".browser-profile");
-    fs.mkdirSync(profileDir, { recursive: true });
+    fs.mkdirSync(opts.profileDir, { recursive: true });
 
     const args = [
       "--no-sandbox",
@@ -44,7 +59,7 @@ function launchChrome(
       "--no-first-run",
       "--no-default-browser-check",
       `--window-size=${config.viewport.width},${config.viewport.height + 87}`,
-      `--user-data-dir=${profileDir}`,
+      `--user-data-dir=${opts.profileDir}`,
       "--disable-blink-features=AutomationControlled",
       "--disable-infobars",
       "--disable-background-timer-throttling",
@@ -52,7 +67,7 @@ function launchChrome(
       "--disable-renderer-backgrounding",
     ];
 
-    if (config.headless) {
+    if (opts.headless) {
       args.push("--headless=new");
     }
 
@@ -92,104 +107,93 @@ function launchChrome(
   });
 }
 
-export async function initBrowser(
-  config: AppConfig,
+export function buildStagehandLogger(
   costTracker?: CostTracker,
-): Promise<Stagehand> {
-  if (instance) return instance;
-
-  const chromePath = findPlaywrightChromium();
-  const chrome = await launchChrome(chromePath, config);
-  chromeProcess = chrome.process;
-
+  browserName?: string,
+): (logLine: unknown) => void {
   let pendingStep = "";
+  const prefix = browserName && browserName !== "main"
+    ? chalk.dim(`[${browserName}] `)
+    : "";
 
-  const stagehand = new Stagehand({
-    env: "LOCAL",
-    model: config.utilityModel,
-    localBrowserLaunchOptions: {
-      cdpUrl: chrome.wsUrl,
-      viewport: config.viewport,
-    },
-    logger: (logLine) => {
-      const entry = logLine as Record<string, unknown>;
+  return (logLine: unknown) => {
+    const entry = logLine as Record<string, unknown>;
 
-      if (costTracker) {
-        const inputTokens = entry.inputTokens as number | undefined;
-        const outputTokens = entry.outputTokens as number | undefined;
-        if (
-          typeof inputTokens === "number" &&
-          typeof outputTokens === "number"
-        ) {
-          costTracker.addTokens(inputTokens, outputTokens);
-        }
+    if (costTracker) {
+      const inputTokens = entry.inputTokens as number | undefined;
+      const outputTokens = entry.outputTokens as number | undefined;
+      if (
+        typeof inputTokens === "number" &&
+        typeof outputTokens === "number"
+      ) {
+        costTracker.addTokens(inputTokens, outputTokens);
       }
+    }
 
-      const msg = String(entry.msg ?? entry.message ?? "");
-      const auxiliary = entry.auxiliary as
-        | Record<string, { value?: string }>
-        | undefined;
+    const msg = String(entry.msg ?? entry.message ?? "");
+    const auxiliary = entry.auxiliary as
+      | Record<string, { value?: string }>
+      | undefined;
 
-      if (msg.includes("Executing step")) {
-        const m = msg.match(/Executing step (\d+)\/(\d+)/);
-        if (m) pendingStep = `${m[1]}/${m[2]}`;
-        return;
-      }
+    if (msg.includes("Executing step")) {
+      const m = msg.match(/Executing step (\d+)\/(\d+)/);
+      if (m) pendingStep = `${m[1]}/${m[2]}`;
+      return;
+    }
 
-      if (msg.includes("Agent calling tool:")) {
-        const tool = msg.replace(/.*Agent calling tool:\s*/, "");
-        let detail = "";
+    if (msg.includes("Agent calling tool:")) {
+      const tool = msg.replace(/.*Agent calling tool:\s*/, "");
+      let detail = "";
 
-        if (auxiliary?.instruction?.value) {
-          detail = ` → "${auxiliary.instruction.value.slice(0, 80)}"`;
-        } else if (auxiliary?.url?.value) {
-          detail = ` → ${auxiliary.url.value}`;
-        } else if (auxiliary?.arguments?.value) {
-          try {
-            const parsed = JSON.parse(auxiliary.arguments.value);
-            if (Array.isArray(parsed)) {
-              const summary = parsed
-                .map((f: { action?: string }) => f.action ?? "")
-                .filter(Boolean)
-                .join(", ");
-              if (summary) detail = ` → ${summary.slice(0, 100)}`;
-            } else {
-              detail = ` → "${String(auxiliary.arguments.value).slice(0, 80)}"`;
-            }
-          } catch {
-            detail = ` → "${auxiliary.arguments.value.slice(0, 80)}"`;
+      if (auxiliary?.instruction?.value) {
+        detail = ` → "${auxiliary.instruction.value.slice(0, 80)}"`;
+      } else if (auxiliary?.url?.value) {
+        detail = ` → ${auxiliary.url.value}`;
+      } else if (auxiliary?.arguments?.value) {
+        try {
+          const parsed = JSON.parse(auxiliary.arguments.value);
+          if (Array.isArray(parsed)) {
+            const summary = parsed
+              .map((f: { action?: string }) => f.action ?? "")
+              .filter(Boolean)
+              .join(", ");
+            if (summary) detail = ` → ${summary.slice(0, 100)}`;
+          } else {
+            detail = ` → "${String(auxiliary.arguments.value).slice(0, 80)}"`;
           }
-        } else if (auxiliary?.direction?.value) {
-          detail = ` ${auxiliary.direction.value}`;
+        } catch {
+          detail = ` → "${auxiliary.arguments.value.slice(0, 80)}"`;
         }
-
-        const stepLabel = pendingStep ? `${pendingStep} ` : "";
-        pendingStep = "";
-        process.stdout.write(
-          chalk.dim(`  [step ${stepLabel}${tool}]`) +
-            (detail ? chalk.dim(detail) : "") +
-            "\n",
-        );
-        return;
+      } else if (auxiliary?.direction?.value) {
+        detail = ` ${auxiliary.direction.value}`;
       }
 
-      if (msg.includes("Reasoning:") || msg.includes("reasoning:")) {
-        const reasoning = msg.replace(/.*[Rr]easoning:\s*/, "").trim();
-        if (reasoning.length > 0) {
-          process.stdout.write(chalk.dim.italic(`  [thinking] ${reasoning}\n`));
-        }
-      }
-    },
-  });
+      const stepLabel = pendingStep ? `${pendingStep} ` : "";
+      pendingStep = "";
+      process.stdout.write(
+        prefix +
+        chalk.dim(`  [step ${stepLabel}${tool}]`) +
+          (detail ? chalk.dim(detail) : "") +
+          "\n",
+      );
+      return;
+    }
 
-  await stagehand.init();
-  instance = stagehand;
-  return stagehand;
+    if (msg.includes("Reasoning:") || msg.includes("reasoning:")) {
+      const reasoning = msg.replace(/.*[Rr]easoning:\s*/, "").trim();
+      if (reasoning.length > 0) {
+        process.stdout.write(prefix + chalk.dim.italic(`  [thinking] ${reasoning}\n`));
+      }
+    }
+  };
 }
 
+// ── Pool-backed compat layer ──────────────────────────────────────────
+// These keep the existing import signatures working across modes.ts, learning.ts, etc.
+
 export async function captureScreenshot(label: string): Promise<string> {
-  const stagehand = getStagehand();
-  const page = stagehand.context.pages()[0];
+  const browser = pool().active();
+  const page = browser.activeTab();
   if (!page) throw new Error("No active page for screenshot");
 
   const dir = path.resolve("data", "screenshots");
@@ -206,35 +210,14 @@ export async function captureScreenshot(label: string): Promise<string> {
   return filePath;
 }
 
-export async function closeBrowser(): Promise<void> {
-  if (instance) {
-    await instance.close();
-    instance = null;
-  }
-  if (chromeProcess) {
-    chromeProcess.kill();
-    chromeProcess = null;
-  }
-}
-
-export function getStagehand(): Stagehand {
-  if (!instance) {
-    throw new Error("Browser not initialized. Call initBrowser() first.");
-  }
-  return instance;
+export function getStagehand() {
+  return pool().active().stagehand;
 }
 
 export function getCurrentUrl(): string {
-  const stagehand = getStagehand();
-  const page = stagehand.context.pages()[0];
-  return page?.url() ?? "about:blank";
+  return pool().active().getUrl();
 }
 
 export function getDomain(): string {
-  try {
-    const url = getCurrentUrl();
-    return new URL(url).hostname;
-  } catch {
-    return "unknown";
-  }
+  return pool().active().getDomain();
 }

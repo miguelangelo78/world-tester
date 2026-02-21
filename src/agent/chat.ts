@@ -2,13 +2,17 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AppConfig } from "../config/types.js";
 import { SiteKnowledge, Learning, SessionEntry } from "../memory/types.js";
 import { buildSystemPrompt } from "./system-prompt.js";
+import type { BrowserPool } from "../browser/pool.js";
 
-export type ChatAction = "chat" | "task" | "act" | "goto" | "learn" | "extract";
+export type ChatAction =
+  | "chat" | "task" | "act" | "goto" | "learn" | "extract"
+  | "spawn_browser" | "switch_browser";
 
 export interface ChatResponse {
   action: ChatAction;
   message?: string;
   instruction?: string;
+  options?: Record<string, unknown>;
   inputTokens: number;
   outputTokens: number;
 }
@@ -33,6 +37,8 @@ Actions:
   {"action": "goto", "instruction": "https://..."} — navigate to a URL
   {"action": "learn", "instruction": "..."} — explore/learn a page
   {"action": "extract", "instruction": "..."} — read data from the page
+  {"action": "spawn_browser", "instruction": "<name>", "options": {"isolated": true}} — open a new browser instance
+  {"action": "switch_browser", "instruction": "<name>"} — switch to an existing browser instance
 
 Examples:
   "switch to light mode" → {"action": "act", "instruction": "click the dark/light mode toggle"}
@@ -41,9 +47,13 @@ Examples:
   "go to account settings" → {"action": "task", "instruction": "navigate to account settings page"}
   "click the save button" → {"action": "act", "instruction": "click the Save button"}
   "let's try that again" → {"action": "task", "instruction": "..."} (infer from context what to retry)
+  "open a new browser as userB" → {"action": "spawn_browser", "instruction": "userB", "options": {"isolated": true}}
+  "switch to the admin browser" → {"action": "switch_browser", "instruction": "admin"}
 
 Rules:
 - Any message that asks to DO, CHANGE, CLICK, SWITCH, TRY, OPEN, UPDATE, SET, TOGGLE, or NAVIGATE is a browser action. NEVER classify these as chat.
+- "open a new browser", "spawn browser", "launch another browser" → spawn_browser
+- "switch to browser X", "use browser X" → switch_browser (only if a browser with that name exists)
 - Even if a similar task failed before, still classify it as a browser action — the user wants to try again.
 - Only use "chat" when the user is genuinely asking a question or making conversation with no action implied.
 - For browser actions, write the instruction as if telling a browser agent. Be specific.
@@ -190,13 +200,15 @@ export async function runSmartChat(
   siteKnowledge: SiteKnowledge | null,
   learnings: Learning[],
   currentUrl: string,
+  pool?: BrowserPool,
 ): Promise<ChatResponse> {
   const baseSystemText = buildSystemText(currentUrl, siteKnowledge, learnings);
 
-  // Phase 1: classify intent (cheap, non-streaming)
-  // Include recent context hint so "try again" / "do it again" resolves correctly
   const recentContext = getRecentContextHint();
-  const classifySystemText = baseSystemText + "\n\n" + CLASSIFY_PROMPT +
+  const browserContext = pool
+    ? `\nActive browsers: ${pool.list().map(b => `"${b.name}"`).join(", ") || "none"}. Active: "${pool.activeLabel()}".`
+    : "";
+  const classifySystemText = baseSystemText + browserContext + "\n\n" + CLASSIFY_PROMPT +
     (recentContext ? `\n\nRecent conversation context (use this to resolve "again", "retry", "that", etc.):\n${recentContext}` : "");
 
   const classifyModel = buildModel(config, classifySystemText);
@@ -212,11 +224,11 @@ export async function runSmartChat(
   const parsed = parseActionJson(raw);
 
   if (parsed && parsed.action !== "chat") {
-    // Browser action handoff — no phase 2 needed
     addToHistory("user", message);
     return {
       action: parsed.action,
       instruction: parsed.instruction ?? message,
+      options: parsed.options,
       inputTokens: classifyIn,
       outputTokens: classifyOut,
     };
@@ -254,9 +266,10 @@ export async function runSmartChat(
 
 function parseActionJson(
   raw: string,
-): { action: ChatAction; message?: string; instruction?: string } | null {
+): { action: ChatAction; message?: string; instruction?: string; options?: Record<string, unknown> } | null {
   const validActions: ChatAction[] = [
     "chat", "task", "act", "goto", "learn", "extract",
+    "spawn_browser", "switch_browser",
   ];
 
   // Strip markdown code fences if present
@@ -265,15 +278,18 @@ function parseActionJson(
     .replace(/\s*```$/, "")
     .trim();
 
+  const extractFields = (obj: any) => ({
+    action: obj.action as ChatAction,
+    message: typeof obj.message === "string" ? obj.message : undefined,
+    instruction: typeof obj.instruction === "string" ? obj.instruction : undefined,
+    options: typeof obj.options === "object" && obj.options !== null ? obj.options : undefined,
+  });
+
   // Try direct parse first
   try {
     const obj = JSON.parse(cleaned);
     if (obj && typeof obj.action === "string" && validActions.includes(obj.action)) {
-      return {
-        action: obj.action,
-        message: typeof obj.message === "string" ? obj.message : undefined,
-        instruction: typeof obj.instruction === "string" ? obj.instruction : undefined,
-      };
+      return extractFields(obj);
     }
   } catch {
     // JSON.parse failed — model may have put literal newlines inside string values
@@ -288,11 +304,7 @@ function parseActionJson(
     );
     const obj = JSON.parse(escaped);
     if (obj && typeof obj.action === "string" && validActions.includes(obj.action)) {
-      return {
-        action: obj.action,
-        message: typeof obj.message === "string" ? obj.message : undefined,
-        instruction: typeof obj.instruction === "string" ? obj.instruction : undefined,
-      };
+      return extractFields(obj);
     }
   } catch {
     // Still not valid JSON

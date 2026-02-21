@@ -15,7 +15,19 @@ export interface ParsedCommand {
   mode: CommandMode;
   instruction: string;
   raw: string;
+  targetBrowser?: string;
+  targetTab?: number | string;
 }
+
+export type BrowserCommand =
+  | { type: "browser_list" }
+  | { type: "browser_spawn"; name: string; isolated: boolean }
+  | { type: "browser_kill"; name: string }
+  | { type: "browser_switch"; name: string }
+  | { type: "tab_list" }
+  | { type: "tab_new"; url?: string }
+  | { type: "tab_switch"; target: string }
+  | { type: "tab_close"; index?: number };
 
 const PREFIX_MAP: Record<string, CommandMode> = {
   "e:": "extract",
@@ -30,8 +42,90 @@ const PREFIX_MAP: Record<string, CommandMode> = {
   "test:": "test",
 };
 
-export function parseCommand(input: string): ParsedCommand {
+/**
+ * Try to parse a browser/tab management command.
+ * Returns null when the input is not a browser/tab command.
+ */
+export function parseBrowserCommand(input: string): BrowserCommand | null {
   const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower === "browser" || lower === "browsers") {
+    return { type: "browser_list" };
+  }
+
+  const spawnMatch = trimmed.match(
+    /^browser:spawn\s+(\S+)(\s+--isolated)?$/i,
+  );
+  if (spawnMatch) {
+    return {
+      type: "browser_spawn",
+      name: spawnMatch[1],
+      isolated: !!spawnMatch[2],
+    };
+  }
+
+  const killMatch = trimmed.match(/^browser:kill\s+(\S+)$/i);
+  if (killMatch) {
+    return { type: "browser_kill", name: killMatch[1] };
+  }
+
+  const switchMatch = trimmed.match(/^browser:switch\s+(\S+)$/i);
+  if (switchMatch) {
+    return { type: "browser_switch", name: switchMatch[1] };
+  }
+
+  if (lower === "tab" || lower === "tabs") {
+    return { type: "tab_list" };
+  }
+
+  const tabNewMatch = trimmed.match(/^tab:new(?:\s+(.+))?$/i);
+  if (tabNewMatch) {
+    return { type: "tab_new", url: tabNewMatch[1]?.trim() || undefined };
+  }
+
+  const tabSwitchMatch = trimmed.match(/^tab:switch\s+(.+)$/i);
+  if (tabSwitchMatch) {
+    return { type: "tab_switch", target: tabSwitchMatch[1].trim() };
+  }
+
+  const tabCloseMatch = trimmed.match(/^tab:close(?:\s+(\d+))?$/i);
+  if (tabCloseMatch) {
+    return {
+      type: "tab_close",
+      index: tabCloseMatch[1] !== undefined
+        ? parseInt(tabCloseMatch[1], 10)
+        : undefined,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Parse a regular agent command.
+ * Strips an optional `@browserName` prefix used for targeting a specific browser.
+ */
+export function parseCommand(input: string): ParsedCommand {
+  let trimmed = input.trim();
+
+  let targetBrowser: string | undefined;
+  let targetTab: number | string | undefined;
+  const atMatch = trimmed.match(/^@(\S+)\s+(.+)$/);
+  if (atMatch) {
+    const target = atMatch[1];
+    trimmed = atMatch[2].trim();
+
+    const colonIdx = target.indexOf(":");
+    if (colonIdx !== -1) {
+      targetBrowser = target.slice(0, colonIdx);
+      const tabPart = target.slice(colonIdx + 1);
+      const asNum = parseInt(tabPart, 10);
+      targetTab = !isNaN(asNum) && String(asNum) === tabPart ? asNum : tabPart;
+    } else {
+      targetBrowser = target;
+    }
+  }
 
   for (const [prefix, mode] of Object.entries(PREFIX_MAP)) {
     if (trimmed.toLowerCase().startsWith(prefix)) {
@@ -39,19 +133,21 @@ export function parseCommand(input: string): ParsedCommand {
         mode,
         instruction: trimmed.slice(prefix.length).trim(),
         raw: trimmed,
+        targetBrowser,
+        targetTab,
       };
     }
   }
 
   if (trimmed.toLowerCase() === "l" || trimmed.toLowerCase() === "learn") {
-    return { mode: "learn", instruction: "", raw: trimmed };
+    return { mode: "learn", instruction: "", raw: trimmed, targetBrowser, targetTab };
   }
 
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    return { mode: "goto", instruction: trimmed, raw: trimmed };
+    return { mode: "goto", instruction: trimmed, raw: trimmed, targetBrowser, targetTab };
   }
 
-  return { mode: "auto", instruction: trimmed, raw: trimmed };
+  return { mode: "auto", instruction: trimmed, raw: trimmed, targetBrowser, targetTab };
 }
 
 export function getHelpText(): string {
@@ -69,10 +165,26 @@ export function getHelpText(): string {
     "  test: <ticket> Run a QA test — plans steps, executes, verifies, reports",
     "  (no prefix)   Agent decides the best approach (or chats if conversational)",
     "",
+    "  @name <cmd>       Target a specific browser (e.g. @userA t: go to settings)",
+    "  @name:tab <cmd>   Target a browser + tab (e.g. @userA:1 e: extract data)",
+    "                     Tab can be an index (0, 1, ...) or a URL fragment",
+    "",
+    "Browser management:",
+    "  browser                       List all browsers and their tabs",
+    "  browser:spawn <name> [--isolated]  Launch a new browser instance",
+    "  browser:kill <name>           Close a browser instance",
+    "  browser:switch <name>         Switch active browser",
+    "",
+    "Tab management:",
+    "  tab                           List tabs in the active browser",
+    "  tab:new [url]                 Open a new tab",
+    "  tab:switch <index or url>     Switch active tab",
+    "  tab:close [index]             Close a tab",
+    "",
     "  help          Show this help text",
     "  cost          Show session cost summary",
     "  history       Show recent task history",
     "  knowledge     Show what the agent knows about this site",
-    "  quit / exit   Close the browser and exit",
+    "  quit / exit   Close all browsers and exit",
   ].join("\n");
 }

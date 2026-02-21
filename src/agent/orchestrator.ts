@@ -3,6 +3,7 @@ import { AppConfig } from "../config/types.js";
 import { CostTracker } from "../cost/tracker.js";
 import { MemoryManager } from "../memory/manager.js";
 import { ParsedCommand } from "../cli/parser.js";
+import { BrowserPool } from "../browser/pool.js";
 import { getDomain, getCurrentUrl } from "../browser/stagehand.js";
 import * as display from "../cli/display.js";
 import {
@@ -20,28 +21,62 @@ import { runSmartChat, runChat, addToHistory } from "./chat.js";
 import { runTest } from "./test-runner.js";
 
 export class Orchestrator {
-  private stagehand: Stagehand;
+  private pool: BrowserPool;
   private config: AppConfig;
   private costTracker: CostTracker;
   private memory: MemoryManager;
 
   constructor(
-    stagehand: Stagehand,
+    pool: BrowserPool,
     config: AppConfig,
     costTracker: CostTracker,
     memory: MemoryManager,
   ) {
-    this.stagehand = stagehand;
+    this.pool = pool;
     this.config = config;
     this.costTracker = costTracker;
     this.memory = memory;
   }
 
+  /**
+   * Resolve the target browser instance, switching its active tab if
+   * the command includes a @browser:tab specifier.
+   */
+  private resolveTarget(command: ParsedCommand) {
+    const browser = command.targetBrowser
+      ? this.pool.get(command.targetBrowser)
+      : this.pool.active();
+
+    if (command.targetTab !== undefined) {
+      browser.switchTab(command.targetTab);
+    }
+
+    return browser;
+  }
+
+  private resolveStagehand(command: ParsedCommand): Stagehand {
+    return this.resolveTarget(command).stagehand;
+  }
+
+  private resolveDomain(command: ParsedCommand): string {
+    return this.resolveTarget(command).getDomain();
+  }
+
+  private resolveUrl(command: ParsedCommand): string {
+    return this.resolveTarget(command).getUrl();
+  }
+
   async execute(command: ParsedCommand): Promise<void> {
     const startTime = Date.now();
-    const domain = getDomain();
+    const stagehand = this.resolveStagehand(command);
+    const domain = this.resolveDomain(command);
 
-    display.info(`${display.modeLabel(command.mode)} ${command.instruction}`);
+    if (command.targetBrowser) {
+      const tabLabel = command.targetTab !== undefined ? `:${command.targetTab}` : "";
+      display.info(`[→ ${command.targetBrowser}${tabLabel}] ${display.modeLabel(command.mode)} ${command.instruction}`);
+    } else {
+      display.info(`${display.modeLabel(command.mode)} ${command.instruction}`);
+    }
 
     const siteKnowledge = await this.memory.getSiteKnowledge(domain);
     const learnings = await this.memory.getLearnings(domain);
@@ -51,17 +86,17 @@ export class Orchestrator {
     try {
       switch (command.mode) {
         case "extract":
-          result = await runExtract(this.stagehand, command.instruction);
+          result = await runExtract(stagehand, command.instruction);
           break;
         case "act":
-          result = await runAct(this.stagehand, command.instruction);
+          result = await runAct(stagehand, command.instruction);
           break;
         case "observe":
-          result = await runObserve(this.stagehand, command.instruction);
+          result = await runObserve(stagehand, command.instruction);
           break;
         case "task":
           result = await runTask(
-            this.stagehand,
+            stagehand,
             command.instruction,
             this.config,
             siteKnowledge,
@@ -69,11 +104,11 @@ export class Orchestrator {
           );
           break;
         case "goto":
-          result = await runGoto(this.stagehand, command.instruction);
+          result = await runGoto(stagehand, command.instruction);
           break;
         case "search":
           result = await runSearch(
-            this.stagehand,
+            stagehand,
             command.instruction,
             this.config,
             siteKnowledge,
@@ -82,7 +117,7 @@ export class Orchestrator {
           break;
         case "ask":
           result = await runAsk(
-            this.stagehand,
+            stagehand,
             command.instruction,
             siteKnowledge,
             learnings,
@@ -90,13 +125,13 @@ export class Orchestrator {
           break;
         case "chat": {
           result = await this.runSmartMode(
-            command.instruction, siteKnowledge, learnings,
+            command.instruction, siteKnowledge, learnings, stagehand,
           );
           break;
         }
         case "learn":
           result = await runLearn(
-            this.stagehand,
+            stagehand,
             this.config,
             this.memory,
             command.instruction,
@@ -104,17 +139,18 @@ export class Orchestrator {
           break;
         case "test":
           result = await runTest(
-            this.stagehand,
+            stagehand,
             command.instruction,
             this.config,
             this.costTracker,
             this.memory,
             siteKnowledge,
             learnings,
+            this.pool,
           );
           break;
         case "auto":
-          result = await this.runAuto(command.instruction, siteKnowledge, learnings);
+          result = await this.runAuto(command.instruction, siteKnowledge, learnings, stagehand);
           break;
         default:
           result = { message: `Unknown mode: ${command.mode}`, success: false };
@@ -143,7 +179,6 @@ export class Orchestrator {
     display.info(`Completed in ${(duration / 1000).toFixed(1)}s`);
     display.separator();
 
-    // Log to session
     this.memory.addSessionEntry({
       role: "user",
       content: command.raw,
@@ -156,15 +191,12 @@ export class Orchestrator {
       cost_usd: costSnapshot.costUsd,
     });
 
-    // Keep chat history in sync for non-chat modes so the agent remembers
-    // everything that happened when the user switches to chat later
     if (!["chat", "auto"].includes(command.mode)) {
       const modeTag = `[${command.mode}]`;
       addToHistory("user", `${modeTag} ${command.instruction}`);
       addToHistory("model", `${modeTag} ${result.message.slice(0, 300)}`);
     }
 
-    // Save task record for task and test modes
     const taskId = Date.now().toString(36);
     if (command.mode === "task" || command.mode === "test") {
       await this.memory.saveTaskRecord({
@@ -186,10 +218,9 @@ export class Orchestrator {
 
     await this.memory.saveSession();
 
-    // Self-training runs in background so the prompt returns immediately
     if (!["goto", "learn", "chat"].includes(command.mode)) {
       extractPostCommandLearnings(
-        this.stagehand,
+        stagehand,
         this.memory,
         domain,
         command.instruction,
@@ -204,31 +235,36 @@ export class Orchestrator {
     instruction: string,
     siteKnowledge: Awaited<ReturnType<MemoryManager["getSiteKnowledge"]>>,
     learnings: Awaited<ReturnType<MemoryManager["getLearnings"]>>,
+    stagehand: Stagehand,
   ): Promise<ModeResult> {
-    // Direct URL navigation bypass
     const urlMatch = instruction.match(/^https?:\/\/\S+$/);
     if (urlMatch) {
-      return runGoto(this.stagehand, urlMatch[0]);
+      return runGoto(stagehand, urlMatch[0]);
     }
 
-    return this.runSmartMode(instruction, siteKnowledge, learnings);
+    return this.runSmartMode(instruction, siteKnowledge, learnings, stagehand);
   }
 
   /**
    * Shared smart routing: intent classification via chat agent, with handoff to
-   * browser modes when needed. Used by both `c:` (chat) and auto (no prefix).
+   * browser modes when needed. Now also handles spawn_browser / switch_browser
+   * actions from the classifier.
    */
   private async runSmartMode(
     instruction: string,
     siteKnowledge: Awaited<ReturnType<MemoryManager["getSiteKnowledge"]>>,
     learnings: Awaited<ReturnType<MemoryManager["getLearnings"]>>,
+    stagehand: Stagehand,
   ): Promise<ModeResult> {
+    const currentUrl = this.resolveUrlFromStagehand(stagehand);
+
     const chatResult = await runSmartChat(
       instruction,
       this.config,
       siteKnowledge,
       learnings,
-      getCurrentUrl(),
+      currentUrl,
+      this.pool,
     );
 
     const classifyCost = {
@@ -245,6 +281,52 @@ export class Orchestrator {
       };
     }
 
+    // Handle browser pool actions from the classifier
+    if (chatResult.action === "spawn_browser") {
+      const name = chatResult.instruction ?? `browser-${this.pool.size() + 1}`;
+      const isolated = (chatResult as any).options?.isolated ?? false;
+      try {
+        display.info(`Spawning browser "${name}"...`);
+        await this.pool.spawn(name, {
+          profile: isolated ? "isolated" : "shared",
+          startUrl: this.config.targetUrl,
+        });
+        display.success(`Browser "${name}" ready`);
+        return {
+          message: `Spawned new browser "${name}"`,
+          usage: classifyCost,
+          success: true,
+          streamed: false,
+        };
+      } catch (err) {
+        return {
+          message: `Failed to spawn browser: ${err instanceof Error ? err.message : String(err)}`,
+          usage: classifyCost,
+          success: false,
+        };
+      }
+    }
+
+    if (chatResult.action === "switch_browser") {
+      const target = chatResult.instruction ?? "";
+      try {
+        this.pool.setActive(target);
+        display.success(`Switched to browser "${target}"`);
+        return {
+          message: `Switched to browser "${target}"`,
+          usage: classifyCost,
+          success: true,
+          streamed: false,
+        };
+      } catch (err) {
+        return {
+          message: `Failed to switch browser: ${err instanceof Error ? err.message : String(err)}`,
+          usage: classifyCost,
+          success: false,
+        };
+      }
+    }
+
     // Hand off to browser mode
     const handoffInstruction = chatResult.instruction ?? instruction;
     display.modeSwitch("chat", chatResult.action, handoffInstruction);
@@ -254,7 +336,7 @@ export class Orchestrator {
     switch (chatResult.action) {
       case "task":
         browserResult = await runTask(
-          this.stagehand,
+          stagehand,
           handoffInstruction,
           this.config,
           siteKnowledge,
@@ -262,33 +344,34 @@ export class Orchestrator {
         );
         break;
       case "act":
-        browserResult = await runAct(this.stagehand, handoffInstruction);
+        browserResult = await runAct(stagehand, handoffInstruction);
         break;
       case "goto":
-        browserResult = await runGoto(this.stagehand, handoffInstruction);
+        browserResult = await runGoto(stagehand, handoffInstruction);
         break;
       case "learn":
         browserResult = await runLearn(
-          this.stagehand,
+          stagehand,
           this.config,
           this.memory,
           handoffInstruction,
         );
         break;
       case "extract":
-        browserResult = await runExtract(this.stagehand, handoffInstruction);
+        browserResult = await runExtract(stagehand, handoffInstruction);
         break;
       default:
-        browserResult = await runAct(this.stagehand, handoffInstruction);
+        browserResult = await runAct(stagehand, handoffInstruction);
     }
 
-    // Inject browser result into chat history, then stream a chat follow-up
     const status = browserResult.success ? "completed" : "failed";
     const resultSummary = browserResult.message.slice(0, 500);
     addToHistory("model", `[${chatResult.action} ${status}] ${resultSummary}`);
 
-    const siteKnowledgeNow = await this.memory.getSiteKnowledge(getDomain());
-    const learningsNow = await this.memory.getLearnings(getDomain());
+    const domainNow = this.resolveDomainFromStagehand(stagehand);
+    const siteKnowledgeNow = await this.memory.getSiteKnowledge(domainNow);
+    const learningsNow = await this.memory.getLearnings(domainNow);
+    const urlNow = this.resolveUrlFromStagehand(stagehand);
 
     const followUp = await runChat(
       `[System: you just executed a ${chatResult.action} action for the user. ` +
@@ -298,7 +381,7 @@ export class Orchestrator {
       this.config,
       siteKnowledgeNow,
       learningsNow,
-      getCurrentUrl(),
+      urlNow,
     );
 
     return {
@@ -315,5 +398,22 @@ export class Orchestrator {
       success: browserResult.success,
       streamed: true,
     };
+  }
+
+  private resolveUrlFromStagehand(stagehand: Stagehand): string {
+    try {
+      const page = stagehand.context.pages()[0];
+      return page?.url() ?? "about:blank";
+    } catch {
+      return getCurrentUrl();
+    }
+  }
+
+  private resolveDomainFromStagehand(stagehand: Stagehand): string {
+    try {
+      return new URL(this.resolveUrlFromStagehand(stagehand)).hostname;
+    } catch {
+      return getDomain();
+    }
   }
 }

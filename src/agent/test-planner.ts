@@ -34,7 +34,7 @@ export async function planTest(
     `{`,
     `  "title": "short test title",`,
     `  "steps": [`,
-    `    { "action": "what to do (be precise, as if instructing a browser agent)", "expected": "what should happen after this action", "critical": true/false }`,
+    `    { "action": "what to do", "expected": "what should happen", "critical": true/false, "setup": true/false }`,
     `  ]`,
     `}`,
     ``,
@@ -42,10 +42,12 @@ export async function planTest(
     `- Each step should be a single, verifiable action.`,
     `- "action" should be specific enough for a browser agent to execute (e.g., "Navigate to /account" not "go to settings").`,
     `- "expected" should be a concrete, observable outcome (e.g., "Page shows 'Account Settings' heading" not "page loads").`,
-    `- "critical" means if this step fails, remaining steps cannot proceed (e.g., navigation or login steps are critical, verification-only steps are not).`,
+    `- "critical": if true and this step fails, remaining steps are skipped (e.g., navigation, login, loading data).`,
+    `- "setup": if true, this step is a prerequisite (navigation, waiting, locating elements) — NOT the actual test assertion. Setup steps do NOT count toward the final pass/fail verdict. Only non-setup steps determine the verdict.`,
+    `- IMPORTANT: Navigation, page loading, waiting for data, and locating/identifying elements are ALWAYS setup steps. The actual verification/assertion of the test condition is NEVER a setup step.`,
     `- Include 3-10 steps. Be thorough but don't over-decompose.`,
-    `- The first step is usually navigation — always critical.`,
-    `- Include a final verification step to confirm the overall goal.`,
+    `- The first step is usually navigation — critical AND setup.`,
+    `- The final steps should be the actual assertions that verify the test goal — critical but NOT setup.`,
   ].join("\n");
 
   const model = genAI.getGenerativeModel({
@@ -59,6 +61,16 @@ export async function planTest(
   return parsePlanResponse(raw, instruction);
 }
 
+function parseStep(s: Record<string, unknown>): TestStep {
+  return {
+    action: String(s.action ?? ""),
+    expected: String(s.expected ?? ""),
+    critical: s.critical !== false,
+    setup: s.setup === true,
+    browser: typeof s.browser === "string" ? s.browser : undefined,
+  };
+}
+
 function tryParseStructured(input: string): TestPlan | null {
   const trimmed = input.trim();
   if (!trimmed.startsWith("{")) return null;
@@ -68,11 +80,7 @@ function tryParseStructured(input: string): TestPlan | null {
     if (obj.title && Array.isArray(obj.steps)) {
       return {
         title: obj.title,
-        steps: obj.steps.map((s: Record<string, unknown>) => ({
-          action: String(s.action ?? ""),
-          expected: String(s.expected ?? ""),
-          critical: s.critical !== false,
-        })),
+        steps: obj.steps.map(parseStep),
       };
     }
   } catch {
@@ -92,17 +100,10 @@ function parsePlanResponse(raw: string, fallbackTitle: string): TestPlan {
     if (obj.title && Array.isArray(obj.steps)) {
       return {
         title: String(obj.title),
-        steps: obj.steps.map(
-          (s: Record<string, unknown>): TestStep => ({
-            action: String(s.action ?? ""),
-            expected: String(s.expected ?? ""),
-            critical: s.critical !== false,
-          }),
-        ),
+        steps: obj.steps.map(parseStep),
       };
     }
   } catch {
-    // Try to extract JSON from the response
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
@@ -110,13 +111,7 @@ function parsePlanResponse(raw: string, fallbackTitle: string): TestPlan {
         if (Array.isArray(obj.steps)) {
           return {
             title: String(obj.title ?? fallbackTitle),
-            steps: obj.steps.map(
-              (s: Record<string, unknown>): TestStep => ({
-                action: String(s.action ?? ""),
-                expected: String(s.expected ?? ""),
-                critical: s.critical !== false,
-              }),
-            ),
+            steps: obj.steps.map(parseStep),
           };
         }
       } catch {
@@ -125,7 +120,6 @@ function parsePlanResponse(raw: string, fallbackTitle: string): TestPlan {
     }
   }
 
-  // Fallback: single-step plan from the raw instruction
   return {
     title: fallbackTitle.slice(0, 80),
     steps: [
