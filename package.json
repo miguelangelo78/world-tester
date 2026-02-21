@@ -9,9 +9,13 @@
     "dev": "tsx watch src/index.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "release": "docker compose down && docker compose up --build -d && npm run logs",
-    "release:interactive": "docker compose down && docker compose up --build -d && docker compose run --rm app",
-    "logs": "docker compose logs -f",
+    "release": "docker compose down && docker compose up --build -d",
+    "release:vnc": "VNC=true docker compose down && VNC=true docker compose up --build -d",
+    "release:interactive": "docker compose run --rm --build app",
+    "release:interactive:vnc": "(while ! nc -z localhost 5900 2>/dev/null; do sleep 1; done && npm run vnc) & VNC=true docker compose run --rm --build --service-ports app",
+    "release:logs": "docker compose logs -f",
+    "release:down": "docker compose down",
+    "vnc": "command -v vncviewer >/dev/null 2>&1 && vncviewer localhost:5900 || echo 'vncviewer not found. Install it: sudo apt install tigervnc-viewer'",
     "postinstall": "prisma generate && npx playwright install chromium"
   },
   "dependencies": {

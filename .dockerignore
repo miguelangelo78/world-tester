@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 data/.browser-profile/
+data/.browser-profile-docker/
 data/screenshots/
 data/site-knowledge/
 data/task-history/

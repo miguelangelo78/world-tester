@@ -1,13 +1,16 @@
 services:
   app:
     build: .
-    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/worldtester}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:5432/worldtester}
       GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY}
       HEADLESS: ${HEADLESS:-true}
       TARGET_URL: ${TARGET_URL:-}
       VNC: ${VNC:-false}
+    ports:
+      - "5900:5900"
     volumes:
       - ./data/screenshots:/app/data/screenshots
       - ./data/.browser-profile-docker:/app/data/.browser-profile

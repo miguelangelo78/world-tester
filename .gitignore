@@ -2,8 +2,9 @@ node_modules/
 dist/
 .env
 
-# Browser profile & screenshots
+# Browser profiles & screenshots
 data/.browser-profile/
+data/.browser-profile-docker/
 data/screenshots/*
 !data/screenshots/.gitkeep
 

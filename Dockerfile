@@ -16,7 +16,8 @@ COPY prisma.config.ts ./
 
 RUN npm ci --ignore-scripts
 
-# Install Playwright Chromium + all its system deps in one shot
+# Install Playwright Chromium to a shared path accessible by any user
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN npx playwright install --with-deps chromium
 
 # Generate Prisma client (dummy URL — only needed for codegen, not connection)

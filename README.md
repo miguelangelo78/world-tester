@@ -31,11 +31,26 @@ cp .env.example .env
 # Edit .env and add your GOOGLE_GENERATIVE_AI_API_KEY and DATABASE_URL
 
 # Interactive CLI mode (build + run)
-docker compose run --rm app
+npm run release:interactive
 
-# With VNC for visual debugging (connect to localhost:5900)
-VNC=true docker compose run --rm app
+# With VNC for visual debugging
+npm run release:interactive:vnc
+# Then in another terminal:
+npm run vnc
 ```
+
+### npm scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm start` | Run locally (auto-syncs DB schema on first start) |
+| `npm run release` | Docker: background mode |
+| `npm run release:vnc` | Docker: background + VNC |
+| `npm run release:interactive` | Docker: interactive CLI |
+| `npm run release:interactive:vnc` | Docker: interactive CLI + VNC |
+| `npm run vnc` | Connect to VNC viewer (install: `sudo apt install tigervnc-viewer`) |
+| `npm run release:logs` | Tail Docker container logs |
+| `npm run release:down` | Stop Docker containers |
 
 Screenshots are automatically saved to `./data/screenshots/` on the host via volume mount.
 
@@ -148,7 +163,7 @@ Conversation history and task results persist across sessions in the database. W
 ```
 src/
 ├── index.ts                 # CLI loop and startup
-├── db.ts                    # Prisma client singleton
+├── db.ts                    # Prisma client singleton + auto-schema sync
 ├── config/
 │   ├── index.ts             # Load .env config
 │   └── types.ts             # AppConfig interface
@@ -179,7 +194,7 @@ prisma/
 └── schema.prisma            # Database schema (PostgreSQL)
 
 docker/
-└── entrypoint.sh            # Xvfb, optional VNC, DB migration, app start
+└── entrypoint.sh            # Xvfb, optional VNC, localhost rewriting, app start
 ```
 
 ### Data Storage
@@ -191,7 +206,8 @@ Filesystem storage is used only for binary/large files:
 ```
 data/
 ├── screenshots/             # Before/after screenshots from test runs
-└── .browser-profile/        # Chromium user data (cookies, sessions)
+├── .browser-profile/        # Chromium user data for local runs
+└── .browser-profile-docker/ # Chromium user data for Docker runs (separate to avoid lock conflicts)
 ```
 
 ## Configuration
@@ -206,30 +222,30 @@ Set these in `.env`:
 | `TARGET_URL`                   | No       | —       | Auto-navigate to this URL on start    |
 | `VNC`                          | No       | `false` | Start VNC server in Docker (port 5900)|
 
-Default `DATABASE_URL`: `postgresql://worldtester:worldtester@localhost:5432/worldtester`
+Default `DATABASE_URL`: `postgresql://postgres:postgres@localhost:5432/worldtester`
 
 ## Docker
 
-### Services
+The Docker setup runs the app with a headless Chromium browser inside a virtual display (Xvfb). VNC can be enabled for visual debugging.
 
-| Service | Image | Description |
-|---------|-------|-------------|
-| `db`    | `postgres:16-alpine` | PostgreSQL database |
-| `app`   | Custom (Dockerfile) | World Tester with Chromium + Xvfb |
+### How it works
 
-### Volume Mounts
+- The container connects to your **host PostgreSQL** — `localhost` and `127.0.0.1` in `DATABASE_URL` and `TARGET_URL` are automatically rewritten to `host.docker.internal` by the entrypoint
+- Screenshots are volume-mounted to `./data/screenshots/` for host access
+- Browser profile is stored in `./data/.browser-profile-docker/` (separate from local runs to avoid lock conflicts)
+- Stale Chromium lock files are cleaned automatically on container start
 
-- `./data/screenshots` → `/app/data/screenshots` — Screenshots accessible from host
-- `./data/.browser-profile` → `/app/data/.browser-profile` — Browser session persistence
-- `pgdata` (named volume) — PostgreSQL data persistence
+### VNC
+
+To see the browser visually while running in Docker:
+
+1. Start with VNC: `npm run release:interactive:vnc` (or `npm run release:vnc` for background)
+2. Connect: `npm run vnc` (requires `tigervnc-viewer` — install with `sudo apt install tigervnc-viewer`)
+3. On Windows/macOS: use any VNC client (e.g. RealVNC Viewer) and connect to `localhost:5900`
 
 ### Running without Docker
 
-You can still run locally without Docker. Just:
-1. Have a PostgreSQL instance running (or use `docker compose up db -d` for just the database)
-2. Set `DATABASE_URL` in `.env`
-3. Run `npm run db:push` to sync the schema
-4. Run `npm start`
+Just set `DATABASE_URL` in `.env` pointing to a PostgreSQL instance and run `npm start`. The app auto-syncs the database schema on startup.
 
 ## Tech Stack
 
