@@ -46,6 +46,7 @@ export function modeLabel(mode: string): string {
     goto: chalk.gray,
     chat: chalk.cyanBright,
     learn: chalk.yellowBright,
+    test: chalk.bold.magenta,
     auto: chalk.dim,
   };
   const colorFn = colors[mode] ?? chalk.dim;
@@ -54,6 +55,34 @@ export function modeLabel(mode: string): string {
 
 export function modeSwitch(from: string, to: string, instruction: string): void {
   console.log(chalk.cyan(`[${from} -> ${to}] ${instruction}`));
+}
+
+export function testStep(
+  index: number,
+  total: number,
+  action: string,
+  status: "running" | "pass" | "fail" | "skip",
+): void {
+  const icons: Record<string, string> = {
+    running: chalk.blue("..."),
+    pass: chalk.green("PASS"),
+    fail: chalk.red("FAIL"),
+    skip: chalk.dim("SKIP"),
+  };
+  console.log(`  [${index + 1}/${total}] ${icons[status]} ${action}`);
+}
+
+export function testVerdict(
+  passed: number,
+  failed: number,
+  skipped: number,
+  verdict: string,
+): void {
+  const fn = failed > 0 ? chalk.red.bold : chalk.green.bold;
+  console.log(fn(`\n  VERDICT: ${verdict.toUpperCase()}`));
+  console.log(
+    `  ${chalk.green(`${passed} passed`)}  ${chalk.red(`${failed} failed`)}  ${chalk.dim(`${skipped} skipped`)}`,
+  );
 }
 
 export function separator(): void {

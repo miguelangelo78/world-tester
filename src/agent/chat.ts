@@ -67,6 +67,7 @@ export function addToHistory(role: "user" | "model", text: string): void {
   if (chatHistory.length > 40) {
     chatHistory = chatHistory.slice(-30);
   }
+  sanitizeHistory();
 }
 
 export function injectSessionContext(entries: SessionEntry[]): void {
@@ -77,6 +78,31 @@ export function injectSessionContext(entries: SessionEntry[]): void {
       parts: [{ text: entry.content }],
     });
   }
+  sanitizeHistory();
+}
+
+/**
+ * Gemini requires history to start with a "user" message and to alternate
+ * user/model without consecutive same-role entries. Strip leading model
+ * messages and merge consecutive same-role messages.
+ */
+function sanitizeHistory(): void {
+  // Drop leading model messages
+  while (chatHistory.length > 0 && chatHistory[0].role === "model") {
+    chatHistory.shift();
+  }
+
+  // Merge consecutive same-role entries
+  const merged: ChatMessage[] = [];
+  for (const msg of chatHistory) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === msg.role) {
+      prev.parts[0].text += "\n" + msg.parts[0].text;
+    } else {
+      merged.push({ role: msg.role, parts: [{ text: msg.parts[0].text }] });
+    }
+  }
+  chatHistory = merged;
 }
 
 function getRecentContextHint(): string {

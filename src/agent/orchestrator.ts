@@ -17,6 +17,7 @@ import {
 } from "./modes.js";
 import { extractPostCommandLearnings, runLearn } from "./learning.js";
 import { runSmartChat, runChat, addToHistory } from "./chat.js";
+import { runTest } from "./test-runner.js";
 
 export class Orchestrator {
   private stagehand: Stagehand;
@@ -101,6 +102,17 @@ export class Orchestrator {
             command.instruction,
           );
           break;
+        case "test":
+          result = await runTest(
+            this.stagehand,
+            command.instruction,
+            this.config,
+            this.costTracker,
+            this.memory,
+            siteKnowledge,
+            learnings,
+          );
+          break;
         case "auto":
           result = await this.runAuto(command.instruction, siteKnowledge, learnings);
           break;
@@ -121,10 +133,10 @@ export class Orchestrator {
     const duration = Date.now() - startTime;
     const costSnapshot = this.costTracker.record(result.usage);
 
-    const isStreamed =
-      (command.mode === "chat" && result.streamed) ||
-      (command.mode === "auto" && result.streamed);
-    if (!isStreamed) {
+    const suppressMessage =
+      command.mode === "test" ||
+      ((command.mode === "chat" || command.mode === "auto") && result.streamed);
+    if (!suppressMessage) {
       display.agentMessage(result.message);
     }
     display.cost(this.costTracker.formatCostLine(costSnapshot));
@@ -152,9 +164,9 @@ export class Orchestrator {
       addToHistory("model", `${modeTag} ${result.message.slice(0, 300)}`);
     }
 
-    // Save task record for task mode
+    // Save task record for task and test modes
     const taskId = Date.now().toString(36);
-    if (command.mode === "task") {
+    if (command.mode === "task" || command.mode === "test") {
       await this.memory.saveTaskRecord({
         id: taskId,
         timestamp: new Date().toISOString(),

@@ -8,6 +8,7 @@ export type CommandMode =
   | "goto"
   | "learn"
   | "chat"
+  | "test"
   | "auto";
 
 export interface ParsedCommand {
@@ -26,6 +27,7 @@ const PREFIX_MAP: Record<string, CommandMode> = {
   "g:": "goto",
   "l:": "learn",
   "c:": "chat",
+  "test:": "test",
 };
 
 export function parseCommand(input: string): ParsedCommand {
@@ -64,6 +66,7 @@ export function getHelpText(): string {
     "  c: <message>  Chat with the agent (conversational, uses knowledge)",
     "  g: <url>      Navigate to a URL (or just paste a URL)",
     "  l / l: [focus] Learn the current website (map pages, forms, flows)",
+    "  test: <ticket> Run a QA test — plans steps, executes, verifies, reports",
     "  (no prefix)   Agent decides the best approach (or chats if conversational)",
     "",
     "  help          Show this help text",

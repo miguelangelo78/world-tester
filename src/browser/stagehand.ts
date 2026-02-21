@@ -187,6 +187,25 @@ export async function initBrowser(
   return stagehand;
 }
 
+export async function captureScreenshot(label: string): Promise<string> {
+  const stagehand = getStagehand();
+  const page = stagehand.context.pages()[0];
+  if (!page) throw new Error("No active page for screenshot");
+
+  const dir = path.resolve("data", "screenshots");
+  fs.mkdirSync(dir, { recursive: true });
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeName = label.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60);
+  const fileName = `${ts}_${safeName}.png`;
+  const filePath = path.join(dir, fileName);
+
+  const buffer = await page.screenshot({ fullPage: false });
+  fs.writeFileSync(filePath, buffer);
+
+  return filePath;
+}
+
 export async function closeBrowser(): Promise<void> {
   if (instance) {
     await instance.close();
