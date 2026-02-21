@@ -49,30 +49,39 @@ export class CostTracker {
     this.pendingOutput += outputTokens;
   }
 
-  record(usage: UsageData | undefined): CostSnapshot {
+  /**
+   * Records usage and flushes all pending tokens.  When `model` is provided,
+   * the explicit `usage` tokens are priced at that model's rate while any
+   * previously accumulated tokens (from `addTokens`) use the default CUA rate.
+   */
+  record(usage: UsageData | undefined, model?: string): CostSnapshot {
+    // Price any tokens already queued via addTokens() at the default (CUA) rate
+    const preInput = this.pendingInput;
+    const preOutput = this.pendingOutput;
+    const defaultPricing = getPricing(this.model);
+    let costUsd =
+      (preInput / 1_000_000) * defaultPricing.inputPerMillionTokens +
+      (preOutput / 1_000_000) * defaultPricing.outputPerMillionTokens;
+    let totalInput = preInput;
+    let totalOutput = preOutput;
+
+    // Price the explicit usage at the specified model rate (or default)
     if (usage) {
-      this.pendingInput += usage.input_tokens;
-      this.pendingOutput += usage.output_tokens;
+      const usagePricing = getPricing(model ?? this.model);
+      costUsd +=
+        (usage.input_tokens / 1_000_000) * usagePricing.inputPerMillionTokens +
+        (usage.output_tokens / 1_000_000) * usagePricing.outputPerMillionTokens;
+      totalInput += usage.input_tokens;
+      totalOutput += usage.output_tokens;
     }
-    return this.flush();
-  }
 
-  flush(): CostSnapshot {
-    const inputTokens = this.pendingInput;
-    const outputTokens = this.pendingOutput;
-
-    const pricing = getPricing(this.model);
-    const costUsd =
-      (inputTokens / 1_000_000) * pricing.inputPerMillionTokens +
-      (outputTokens / 1_000_000) * pricing.outputPerMillionTokens;
-
-    this.sessionTotalInput += inputTokens;
-    this.sessionTotalOutput += outputTokens;
+    this.sessionTotalInput += totalInput;
+    this.sessionTotalOutput += totalOutput;
     this.sessionTotalCost += costUsd;
 
     if (this.ledger) {
-      this.ledger.totalInputTokens += inputTokens;
-      this.ledger.totalOutputTokens += outputTokens;
+      this.ledger.totalInputTokens += totalInput;
+      this.ledger.totalOutputTokens += totalOutput;
       this.ledger.totalCostUsd += costUsd;
       this.saveLedger().catch(() => {});
     }
@@ -80,7 +89,11 @@ export class CostTracker {
     this.pendingInput = 0;
     this.pendingOutput = 0;
 
-    return { inputTokens, outputTokens, costUsd };
+    return { inputTokens: totalInput, outputTokens: totalOutput, costUsd };
+  }
+
+  flush(): CostSnapshot {
+    return this.record(undefined);
   }
 
   getSessionTotal() {

@@ -6,9 +6,9 @@ import { CostTracker } from "../cost/tracker.js";
 import { ModeResult, runAct } from "./modes.js";
 import { UsageData } from "../cost/tracker.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { planTest } from "./test-planner.js";
+import { planTest, PlanContext } from "./test-planner.js";
 import { verifyStep } from "./verify.js";
-import { captureScreenshot, getCurrentUrl, getDomain } from "../browser/stagehand.js";
+import { captureScreenshot } from "../browser/stagehand.js";
 import type { BrowserPool } from "../browser/pool.js";
 import { extractTestStepLearning, extractTestRunLearnings } from "./learning.js";
 import {
@@ -30,6 +30,22 @@ export interface TestRunResult extends ModeResult {
   reportId: string;
 }
 
+function urlFromStagehand(sh: Stagehand): string {
+  try {
+    return sh.context.pages()[0]?.url() ?? "about:blank";
+  } catch {
+    return "about:blank";
+  }
+}
+
+function domainFromStagehand(sh: Stagehand): string {
+  try {
+    return new URL(urlFromStagehand(sh)).hostname;
+  } catch {
+    return "unknown";
+  }
+}
+
 /**
  * End-to-end QA test runner: plans -> executes -> verifies -> reports.
  */
@@ -45,17 +61,23 @@ export async function runTest(
 ): Promise<TestRunResult> {
   const startTime = Date.now();
   let totalUsage: UsageData = { input_tokens: 0, output_tokens: 0 };
-  const domain = getDomain();
+  const domain = domainFromStagehand(stagehand);
+  const currentUrl = urlFromStagehand(stagehand);
   const testTaskId = "test-" + Date.now().toString(36);
 
   // ── Phase 1: Plan ─────────────────────────────────────────────────
   display.info("Planning test steps...");
+  const planContext: PlanContext = {
+    currentUrl,
+    activeBrowsers: pool ? pool.list().map((b) => b.name) : undefined,
+  };
   const plan = await planTest(
     instruction,
     config,
     siteKnowledge,
     learnings,
-    getCurrentUrl(),
+    currentUrl,
+    planContext,
   );
 
   const setupCount = plan.steps.filter((s) => s.setup).length;
@@ -92,18 +114,29 @@ export async function runTest(
     display.testStep(i, plan.steps.length, step.action, "running");
     const stepStart = Date.now();
 
-    // Screenshot before
+    // Resolve browser: if the step specifies one, use it (auto-spawn if needed)
+    let stepStagehand = stagehand;
+    if (step.browser && pool) {
+      if (!pool.has(step.browser)) {
+        display.info(`Spawning browser "${step.browser}" for this test...`);
+        try {
+          await pool.spawn(step.browser, { profile: "isolated" });
+        } catch (err) {
+          display.warn(`Failed to spawn browser "${step.browser}": ${err}`);
+        }
+      }
+      if (pool.has(step.browser)) {
+        stepStagehand = pool.get(step.browser).stagehand;
+      }
+    }
+
+    // Screenshot before (from the correct browser)
     let screenshotBefore: string | undefined;
     try {
-      screenshotBefore = await captureScreenshot(`step${i + 1}_before`);
+      screenshotBefore = await captureScreenshot(`step${i + 1}_before`, stepStagehand);
     } catch {
       // Non-fatal
     }
-
-    // Resolve browser: if the step specifies one and we have a pool, use it
-    const stepStagehand = (step.browser && pool?.has(step.browser))
-      ? pool.get(step.browser).stagehand
-      : stagehand;
 
     // Execute
     const execResult = await executeStep(
@@ -123,10 +156,10 @@ export async function runTest(
       if (page) await page.waitForTimeout(1500);
     } catch { /* non-fatal */ }
 
-    // Screenshot after
+    // Screenshot after (from the correct browser)
     let screenshotAfter: string | undefined;
     try {
-      screenshotAfter = await captureScreenshot(`step${i + 1}_after`);
+      screenshotAfter = await captureScreenshot(`step${i + 1}_after`, stepStagehand);
     } catch {
       // Non-fatal
     }
@@ -155,9 +188,10 @@ export async function runTest(
       durationMs: stepDuration,
     });
 
-    // Learn from this step (fire-and-forget)
+    // Learn from this step — use the step's actual domain, not the initial one
+    const stepDomain = domainFromStagehand(stepStagehand);
     extractTestStepLearning(
-      memory, domain, testTaskId, step, verdict, verification.actual, stepDuration,
+      memory, stepDomain || domain, testTaskId, step, verdict, verification.actual, stepDuration,
     ).catch(() => {});
 
     if (verdict === "fail" && step.critical) {
@@ -202,13 +236,13 @@ export async function runTest(
   const report: TestReport = {
     title: plan.title,
     timestamp: new Date().toISOString(),
-    domain: getDomain(),
+    domain,
     steps: results,
     verdict,
     summary: buildSummaryMessage({
       title: plan.title,
       timestamp: new Date().toISOString(),
-      domain: getDomain(),
+      domain,
       steps: results,
       verdict,
       summary: "",

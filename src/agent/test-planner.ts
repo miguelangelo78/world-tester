@@ -8,12 +8,18 @@ import { TestPlan, TestStep } from "./test-types.js";
  * Decomposes a ticket/description into ordered test steps with expected outcomes.
  * Accepts either free-form text or pre-structured JSON input.
  */
+export interface PlanContext {
+  currentUrl: string;
+  activeBrowsers?: string[];
+}
+
 export async function planTest(
   instruction: string,
   config: AppConfig,
   siteKnowledge: SiteKnowledge | null,
   learnings: Learning[],
   currentUrl: string,
+  context?: PlanContext,
 ): Promise<TestPlan> {
   // If the user provided structured JSON, parse it directly
   const parsed = tryParseStructured(instruction);
@@ -25,16 +31,22 @@ export async function planTest(
     skipBasePrompt: true,
   });
 
+  const browsers = context?.activeBrowsers ?? [];
+  const browserContext = browsers.length > 0
+    ? `Active browser instances: ${browsers.map((b) => `"${b}"`).join(", ")}. Default (no "browser" field) uses the active browser "${browsers[0]}".`
+    : "";
+
   const systemText = [
     `You are a senior QA test planner. Given a ticket or test description, decompose it into precise, ordered test steps.`,
     `The browser is currently on: ${currentUrl}`,
+    browserContext,
     knowledgeContext || "",
     ``,
     `Respond with EXACTLY one JSON object (no markdown, no backticks):`,
     `{`,
     `  "title": "short test title",`,
     `  "steps": [`,
-    `    { "action": "what to do", "expected": "what should happen", "critical": true/false, "setup": true/false }`,
+    `    { "action": "what to do", "expected": "what should happen", "critical": true/false, "setup": true/false, "browser": "optional-name" }`,
     `  ]`,
     `}`,
     ``,
@@ -48,6 +60,18 @@ export async function planTest(
     `- Include 3-10 steps. Be thorough but don't over-decompose.`,
     `- The first step is usually navigation — critical AND setup.`,
     `- The final steps should be the actual assertions that verify the test goal — critical but NOT setup.`,
+    ``,
+    `Multi-browser testing:`,
+    `- If the test requires multiple browsers (e.g., "in two browsers", "cross-browser", "in separate sessions"), use the "browser" field.`,
+    `- Assign a descriptive name to each browser: e.g., "browser-1", "browser-2", or "chrome-a", "chrome-b".`,
+    `- Steps WITHOUT a "browser" field run on the default/active browser.`,
+    `- Steps WITH a "browser" field run on that specific browser instance (it will be auto-spawned if it doesn't exist yet).`,
+    `- When multiple browsers are needed, duplicate the setup/assertion steps for EACH browser. Example for "check logo in two browsers":`,
+    `  1. { "action": "Navigate to /", "browser": "browser-1", "setup": true, ... }`,
+    `  2. { "action": "Visually verify logo is orange", "browser": "browser-1", "setup": false, ... }`,
+    `  3. { "action": "Navigate to /", "browser": "browser-2", "setup": true, ... }`,
+    `  4. { "action": "Visually verify logo is orange", "browser": "browser-2", "setup": false, ... }`,
+    `- If the test does NOT mention multiple browsers, do NOT use the "browser" field.`,
     ``,
     `CRITICAL — agent capabilities:`,
     `- The browser agent is VISUAL. It can see the page and interact (click, type, scroll, navigate) but CANNOT:`,

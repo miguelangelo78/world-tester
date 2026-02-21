@@ -4,7 +4,6 @@ import { CostTracker } from "../cost/tracker.js";
 import { MemoryManager } from "../memory/manager.js";
 import { ParsedCommand } from "../cli/parser.js";
 import { BrowserPool } from "../browser/pool.js";
-import { getDomain, getCurrentUrl } from "../browser/stagehand.js";
 import * as display from "../cli/display.js";
 import {
   runExtract,
@@ -68,8 +67,9 @@ export class Orchestrator {
 
   async execute(command: ParsedCommand): Promise<void> {
     const startTime = Date.now();
-    const stagehand = this.resolveStagehand(command);
-    const domain = this.resolveDomain(command);
+    const target = this.resolveTarget(command);
+    const stagehand = target.stagehand;
+    const domain = target.getDomain();
 
     if (command.targetBrowser) {
       const tabLabel = command.targetTab !== undefined ? `:${command.targetTab}` : "";
@@ -167,7 +167,15 @@ export class Orchestrator {
     }
 
     const duration = Date.now() - startTime;
-    const costSnapshot = this.costTracker.record(result.usage);
+
+    // Modes using the utility/Flash model for their own LLM calls get priced
+    // at the Flash rate; CUA tokens accumulated via addTokens are always priced
+    // at the CUA rate inside record().
+    const utilityModes = ["chat", "auto", "ask"];
+    const resultModel = utilityModes.includes(command.mode)
+      ? this.config.utilityModel
+      : undefined;
+    const costSnapshot = this.costTracker.record(result.usage, resultModel);
 
     const suppressMessage =
       command.mode === "test" ||
@@ -405,7 +413,7 @@ export class Orchestrator {
       const page = stagehand.context.pages()[0];
       return page?.url() ?? "about:blank";
     } catch {
-      return getCurrentUrl();
+      return "about:blank";
     }
   }
 
@@ -413,7 +421,7 @@ export class Orchestrator {
     try {
       return new URL(this.resolveUrlFromStagehand(stagehand)).hostname;
     } catch {
-      return getDomain();
+      return "unknown";
     }
   }
 }

@@ -191,9 +191,18 @@ export function buildStagehandLogger(
 // ── Pool-backed compat layer ──────────────────────────────────────────
 // These keep the existing import signatures working across modes.ts, learning.ts, etc.
 
-export async function captureScreenshot(label: string): Promise<string> {
-  const browser = pool().active();
-  const page = browser.activeTab();
+/**
+ * Take a screenshot.  When `stagehandOverride` is provided the screenshot is
+ * taken from that specific Stagehand instance (i.e. a particular browser from
+ * the pool); otherwise it falls back to the currently-active browser.
+ */
+export async function captureScreenshot(
+  label: string,
+  stagehandOverride?: import("@browserbasehq/stagehand").Stagehand,
+): Promise<string> {
+  const page = stagehandOverride
+    ? stagehandOverride.context.pages()[0]
+    : pool().active().activeTab();
   if (!page) throw new Error("No active page for screenshot");
 
   const dir = path.resolve("data", "screenshots");
