@@ -8,7 +8,16 @@ CRITICAL RULES:
 - Do NOT explore, test, or navigate to pages unrelated to the instruction.
 - The site knowledge below is reference material to help you find things faster — it is NOT a list of tasks to do.
 - ONLY use the search tool if you're stuck or the task is impossible within the current page.
-- Avoid requesting user input. Start working on the instruction immediately.`;
+- Avoid requesting user input. Start working on the instruction immediately.
+
+MODAL & OVERLAY INTERACTION TIPS:
+- Do NOT add unnecessary waits after modals open. Click the target element immediately — the system handles retries if the click doesn't register.
+- If a click on a tab/button inside a modal doesn't work on the first try:
+  1. Click the TEXT label itself, slightly LEFT of center.
+  2. If it still doesn't work after 2 attempts, STOP trying and report the failure — the system will retry using alternative DOM methods automatically.
+- Do NOT waste steps on repeated clicking or keyboard workarounds. Report the failure early.
+- After clicking, verify the content actually changed before proceeding.
+- IMPORTANT: If a click fails, always mention the EXACT TEXT of the element in quotes (e.g., 'I tried to click "Risk Settings" tab but it did not respond').`;
 
 export function buildSystemPrompt(
   siteKnowledge: SiteKnowledge | null,
@@ -76,8 +85,20 @@ function buildSiteSection(k: SiteKnowledge): string {
   return lines.join("\n");
 }
 
+function isUsefulLearning(l: Learning): boolean {
+  const p = l.pattern;
+  // Filter out raw failure logs — they confuse the CUA into thinking they're tasks
+  if (/^"[^"]+"\s+failed:/.test(p)) return false;
+  // Filter out generic "completed successfully" entries
+  if (/completed successfully via/.test(p)) return false;
+  // Filter out "Site exploration completed" noise
+  if (/^Site exploration completed/.test(p)) return false;
+  return true;
+}
+
 function buildLearningsSection(learnings: Learning[]): string {
-  const sorted = [...learnings].sort((a, b) => b.confidence - a.confidence);
+  const useful = learnings.filter(isUsefulLearning);
+  const sorted = [...useful].sort((a, b) => b.confidence - a.confidence);
 
   const groups: Record<string, Learning[]> = {
     recipe: [],

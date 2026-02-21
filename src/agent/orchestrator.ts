@@ -16,7 +16,7 @@ import {
   ModeResult,
 } from "./modes.js";
 import { extractPostCommandLearnings, runLearn } from "./learning.js";
-import { runSmartChat, addToHistory } from "./chat.js";
+import { runSmartChat, runChat, addToHistory } from "./chat.js";
 
 export class Orchestrator {
   private stagehand: Stagehand;
@@ -144,6 +144,14 @@ export class Orchestrator {
       cost_usd: costSnapshot.costUsd,
     });
 
+    // Keep chat history in sync for non-chat modes so the agent remembers
+    // everything that happened when the user switches to chat later
+    if (!["chat", "auto"].includes(command.mode)) {
+      const modeTag = `[${command.mode}]`;
+      addToHistory("user", `${modeTag} ${command.instruction}`);
+      addToHistory("model", `${modeTag} ${result.message.slice(0, 300)}`);
+    }
+
     // Save task record for task mode
     const taskId = Date.now().toString(36);
     if (command.mode === "task") {
@@ -262,18 +270,38 @@ export class Orchestrator {
         browserResult = await runAct(this.stagehand, handoffInstruction);
     }
 
-    // Inject the result back into chat history for follow-up conversations
-    const summary = browserResult.success
-      ? `[${chatResult.action} completed] ${browserResult.message.slice(0, 300)}`
-      : `[${chatResult.action} failed] ${browserResult.message.slice(0, 300)}`;
-    addToHistory("model", summary);
+    // Inject browser result into chat history, then stream a chat follow-up
+    const status = browserResult.success ? "completed" : "failed";
+    const resultSummary = browserResult.message.slice(0, 500);
+    addToHistory("model", `[${chatResult.action} ${status}] ${resultSummary}`);
+
+    const siteKnowledgeNow = await this.memory.getSiteKnowledge(getDomain());
+    const learningsNow = await this.memory.getLearnings(getDomain());
+
+    const followUp = await runChat(
+      `[System: you just executed a ${chatResult.action} action for the user. ` +
+      `The instruction was: "${handoffInstruction}". ` +
+      `Result (${status}): ${resultSummary}. ` +
+      `Give a brief, friendly summary of what happened and ask if they need anything else.]`,
+      this.config,
+      siteKnowledgeNow,
+      learningsNow,
+      getCurrentUrl(),
+    );
 
     return {
-      ...browserResult,
+      message: followUp.message ?? resultSummary,
       usage: {
-        input_tokens: classifyCost.input_tokens + (browserResult.usage?.input_tokens ?? 0),
-        output_tokens: classifyCost.output_tokens + (browserResult.usage?.output_tokens ?? 0),
+        input_tokens: classifyCost.input_tokens
+          + (browserResult.usage?.input_tokens ?? 0)
+          + followUp.inputTokens,
+        output_tokens: classifyCost.output_tokens
+          + (browserResult.usage?.output_tokens ?? 0)
+          + followUp.outputTokens,
       },
+      actions: browserResult.actions,
+      success: browserResult.success,
+      streamed: true,
     };
   }
 }

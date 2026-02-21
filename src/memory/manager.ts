@@ -142,6 +142,17 @@ export class MemoryManager {
 
   // --- Session Log ---
 
+  async loadPreviousSession(): Promise<SessionEntry[]> {
+    const filePath = path.join(this.dataDir, "session-log.json");
+    try {
+      const raw = await fs.readFile(filePath, "utf-8");
+      const prev = JSON.parse(raw) as SessionLog;
+      return prev.entries ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   addSessionEntry(entry: Omit<SessionEntry, "timestamp">): void {
     this.sessionLog.entries.push({
       ...entry,

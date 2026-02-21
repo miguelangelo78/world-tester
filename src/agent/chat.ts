@@ -26,20 +26,29 @@ Today's date is ${new Date().toISOString().split("T")[0]}.`;
 
 const CLASSIFY_PROMPT = `Classify the user's message. Respond with EXACTLY one short JSON object (no markdown, no backticks, just raw JSON).
 
-If the user is asking a question, greeting, chatting, or wants advice:
-  {"action": "chat"}
+Actions:
+  {"action": "chat"} — ONLY for pure questions, greetings, opinions, or advice requests
+  {"action": "task", "instruction": "..."} — complex multi-step browser work
+  {"action": "act", "instruction": "..."} — single browser action (click, toggle, scroll)
+  {"action": "goto", "instruction": "https://..."} — navigate to a URL
+  {"action": "learn", "instruction": "..."} — explore/learn a page
+  {"action": "extract", "instruction": "..."} — read data from the page
 
-If the user wants something DONE in the browser (navigate, click, change settings, test, fill a form, learn a page):
-  {"action": "task", "instruction": "precise description of what to do"} — complex multi-step work
-  {"action": "act", "instruction": "single action"} — one simple action (click, scroll)
-  {"action": "goto", "instruction": "https://full-url"} — navigate to a URL
-  {"action": "learn", "instruction": "optional focus"} — explore/learn a page
-  {"action": "extract", "instruction": "what to read"} — read data from the page
+Examples:
+  "switch to light mode" → {"action": "act", "instruction": "click the dark/light mode toggle"}
+  "change risk to 5%" → {"action": "task", "instruction": "change risk % to 5%"}
+  "what pages have you learned?" → {"action": "chat"}
+  "go to account settings" → {"action": "task", "instruction": "navigate to account settings page"}
+  "click the save button" → {"action": "act", "instruction": "click the Save button"}
+  "let's try that again" → {"action": "task", "instruction": "..."} (infer from context what to retry)
 
 Rules:
-- If in doubt between chat and a browser action, prefer the browser action — the user wants things done.
+- Any message that asks to DO, CHANGE, CLICK, SWITCH, TRY, OPEN, UPDATE, SET, TOGGLE, or NAVIGATE is a browser action. NEVER classify these as chat.
+- Even if a similar task failed before, still classify it as a browser action — the user wants to try again.
+- Only use "chat" when the user is genuinely asking a question or making conversation with no action implied.
 - For browser actions, write the instruction as if telling a browser agent. Be specific.
 - Do NOT include a message field for browser actions, only instruction.
+- When the user says "try again", "do it again", "retry", etc., infer the instruction ONLY from the MOST RECENT task or topic in the conversation — NOT from older history.
 - Keep it short. This is classification only.`;
 
 interface ChatMessage {
@@ -68,6 +77,14 @@ export function injectSessionContext(entries: SessionEntry[]): void {
       parts: [{ text: entry.content }],
     });
   }
+}
+
+function getRecentContextHint(): string {
+  const recent = chatHistory.slice(-6);
+  if (recent.length === 0) return "";
+  return recent
+    .map((m) => `${m.role === "user" ? "User" : "Agent"}: ${m.parts[0].text.slice(0, 150)}`)
+    .join("\n");
 }
 
 function buildModel(config: AppConfig, systemText: string) {
@@ -151,10 +168,12 @@ export async function runSmartChat(
   const baseSystemText = buildSystemText(currentUrl, siteKnowledge, learnings);
 
   // Phase 1: classify intent (cheap, non-streaming)
-  const classifyModel = buildModel(
-    config,
-    baseSystemText + "\n\n" + CLASSIFY_PROMPT,
-  );
+  // Include recent context hint so "try again" / "do it again" resolves correctly
+  const recentContext = getRecentContextHint();
+  const classifySystemText = baseSystemText + "\n\n" + CLASSIFY_PROMPT +
+    (recentContext ? `\n\nRecent conversation context (use this to resolve "again", "retry", "that", etc.):\n${recentContext}` : "");
+
+  const classifyModel = buildModel(config, classifySystemText);
   const classifyChat = classifyModel.startChat({ history: chatHistory });
   const classifyResult = await classifyChat.sendMessage(message);
   const classifyResponse = classifyResult.response;

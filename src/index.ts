@@ -40,8 +40,9 @@ async function main() {
   // Initialize orchestrator
   const orchestrator = new Orchestrator(stagehand, config, costTracker, memory);
 
-  // Seed chat with session context so multi-turn conversations feel natural
-  injectSessionContext(memory.getSessionLog().entries);
+  // Seed chat with previous session context so the agent remembers past interactions
+  const previousEntries = await memory.loadPreviousSession();
+  injectSessionContext(previousEntries);
 
   display.separator();
   console.log(getHelpText());

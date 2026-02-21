@@ -3,6 +3,7 @@ import { AppConfig } from "../config/types.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { Learning, SiteKnowledge } from "../memory/types.js";
 import { UsageData } from "../cost/tracker.js";
+import * as display from "../cli/display.js";
 
 export interface ModeResult {
   message: string;
@@ -57,13 +58,15 @@ export async function runTask(
   siteKnowledge: SiteKnowledge | null,
   learnings: Learning[],
 ): Promise<ModeResult> {
+  const systemPrompt = buildSystemPrompt(siteKnowledge, learnings);
+
   const agent = stagehand.agent({
     mode: "cua",
     model: {
       modelName: config.cuaModel,
       apiKey: config.apiKey,
     },
-    systemPrompt: buildSystemPrompt(siteKnowledge, learnings),
+    systemPrompt,
   });
 
   const result = await agent.execute({
@@ -72,11 +75,232 @@ export async function runTask(
     highlightCursor: true,
   });
 
+  const msg = result.message ?? "Task completed.";
+  const ok = result.success === true;
+  let allActions: unknown[] = [...(result.actions ?? [])];
+  let totalUsage = result.usage as UsageData | undefined;
+
+  // Detect stuck clicks — CUA reports clicking but nothing changed
+  if (looksLikeStuckClick(msg)) {
+    const retryResult = await retryWithAct(stagehand, instruction, msg);
+    if (retryResult?.success) {
+      display.info(`[auto-retry] Clicked "${retryResult.retryTarget}" via fallback. Resuming task...`);
+      allActions.push(...(retryResult.actions ?? []));
+      totalUsage = mergeUsage(totalUsage, retryResult.usage);
+
+      // Resume: run a new CUA pass now that the stuck element was clicked
+      const resumeAgent = stagehand.agent({
+        mode: "cua",
+        model: {
+          modelName: config.cuaModel,
+          apiKey: config.apiKey,
+        },
+        systemPrompt,
+      });
+
+      const resumeInstruction =
+        `A previous automated retry just clicked "${retryResult.retryTarget}" successfully. ` +
+        `The page should now show the content for that element. ` +
+        `Continue with the original task: ${instruction}`;
+
+      const resumeResult = await resumeAgent.execute({
+        instruction: resumeInstruction,
+        maxSteps: 20,
+        highlightCursor: true,
+      });
+
+      const resumeMsg = resumeResult.message ?? "Task resumed and completed.";
+      allActions.push(...(resumeResult.actions ?? []));
+      totalUsage = mergeUsage(totalUsage, resumeResult.usage as UsageData | undefined);
+
+      return {
+        message: `[Auto-retry fixed stuck click on "${retryResult.retryTarget}"]\n${resumeMsg}`,
+        usage: totalUsage,
+        actions: allActions,
+        success: resumeResult.success === true,
+      };
+    }
+  }
+
   return {
-    message: result.message ?? "Task completed.",
-    usage: result.usage as UsageData | undefined,
-    actions: result.actions,
-    success: result.success === true,
+    message: msg,
+    usage: totalUsage,
+    actions: allActions,
+    success: ok,
+  };
+}
+
+const STUCK_PATTERNS = [
+  /tab.*(?:didn't|did not|doesn't|does not|won't|could not|couldn't).*(?:respond|work|change|switch|open)/i,
+  /click.*(?:didn't|did not|doesn't|does not).*(?:work|change|anything|respond)/i,
+  /(?:still|remains?).*(?:same|selected|unchanged|visible)/i,
+  /(?:unable|failed|couldn't|could not).*(?:click|select|activate|switch|open).*(?:tab|button|link)/i,
+  /(?:content|page|view).*(?:didn't|did not).*(?:change|update|switch)/i,
+  /not (?:easily )?clickable|inaccessible/i,
+];
+
+function looksLikeStuckClick(message: string): boolean {
+  return STUCK_PATTERNS.some((p) => p.test(message));
+}
+
+function extractClickTarget(message: string): string | null {
+  const patterns = [
+    /["']([^"'\n]{3,50})["']\s*tab/i,
+    /(?:click|select|activate|switch to|open)\s+(?:on\s+)?(?:the\s+)?["']([^"'\n]{3,50})["']/i,
+    /(?:click|select|activate|switch to|open)\s+(?:on\s+)?(?:the\s+)?(\S+(?:\s+\S+){0,3})\s+(?:tab|button|link)/i,
+  ];
+  for (const p of patterns) {
+    const m = message.match(p);
+    if (m?.[1]) return m[1].trim();
+  }
+  return null;
+}
+
+interface RetryResult extends ModeResult {
+  retryTarget: string;
+}
+
+async function retryWithAct(
+  stagehand: Stagehand,
+  originalInstruction: string,
+  cuaMessage: string,
+): Promise<RetryResult | null> {
+  const target = extractClickTarget(cuaMessage);
+  if (!target) return null;
+
+  const page = stagehand.context.pages()[0];
+
+  // Attempt 1: Playwright locator with text matching + force click
+  try {
+    const locator = page.locator(
+      `[role="tab"]:has-text("${target}"), button:has-text("${target}"), [data-tab]:has-text("${target}"), a:has-text("${target}")`,
+    );
+    const count = await locator.count();
+    if (count > 0) {
+      await locator.first().click();
+      await page.waitForTimeout(1000);
+      return {
+        message: `[Retry: locator] Clicked "${target}" via Playwright locator.`,
+        success: true,
+        actions: [{ type: "locator-retry", target }],
+        retryTarget: target,
+      };
+    }
+  } catch {
+    // Locator didn't match, continue to next attempt
+  }
+
+  // Attempt 2: DOM evaluate — find by text, dispatch full event sequence
+  try {
+    const clicked = await page.evaluate((txt: string) => {
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_ELEMENT,
+        null,
+      );
+      let node: Element | null = walker.currentNode as Element;
+      const candidates: Element[] = [];
+      while (node) {
+        const text = node.textContent?.trim() ?? "";
+        if (
+          text.toLowerCase().includes(txt.toLowerCase()) &&
+          (node.tagName === "BUTTON" ||
+            node.tagName === "A" ||
+            node.getAttribute("role") === "tab" ||
+            node.getAttribute("data-tab") !== null ||
+            node.classList.contains("tab") ||
+            node.closest("[role='tablist']"))
+        ) {
+          candidates.push(node);
+        }
+        node = walker.nextNode() as Element | null;
+      }
+      // Prefer the deepest (most specific) match
+      candidates.sort((a, b) =>
+        (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0),
+      );
+      const el = candidates[0];
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const opts = { bubbles: true, cancelable: true, clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2 };
+      el.dispatchEvent(new PointerEvent("pointerdown", opts));
+      el.dispatchEvent(new MouseEvent("mousedown", opts));
+      el.dispatchEvent(new PointerEvent("pointerup", opts));
+      el.dispatchEvent(new MouseEvent("mouseup", opts));
+      el.dispatchEvent(new MouseEvent("click", opts));
+      if (el instanceof HTMLElement) el.focus();
+      return true;
+    }, target);
+
+    if (clicked) {
+      await page.waitForTimeout(1000);
+      return {
+        message: `[Retry: DOM events] Dispatched click events on "${target}" via DOM.`,
+        success: true,
+        actions: [{ type: "dom-retry", target }],
+        retryTarget: target,
+      };
+    }
+  } catch {
+    // DOM evaluate failed
+  }
+
+  // Attempt 3: Stagehand act() — DOM-selector based click
+  try {
+    const actResult = await stagehand.act(`Click on "${target}"`);
+    if (actResult.success) {
+      await page.waitForTimeout(1000);
+      return {
+        message: `[Retry: act()] Clicked "${target}" via Stagehand act.`,
+        success: true,
+        actions: [{ type: "act-retry", target }],
+        retryTarget: target,
+      };
+    }
+  } catch {
+    // act() failed
+  }
+
+  // Attempt 4: evaluate to click any element whose text matches, without role filter
+  try {
+    const clicked = await page.evaluate((txt: string) => {
+      const all = document.querySelectorAll("*");
+      for (const el of all) {
+        if (
+          el.children.length === 0 &&
+          el.textContent?.trim().toLowerCase() === txt.toLowerCase() &&
+          el instanceof HTMLElement
+        ) {
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    }, target);
+    if (clicked) {
+      await page.waitForTimeout(1000);
+      return {
+        message: `[Retry: direct .click()] Called .click() on exact-text element "${target}".`,
+        success: true,
+        actions: [{ type: "textclick-retry", target }],
+        retryTarget: target,
+      };
+    }
+  } catch {
+    // direct click failed
+  }
+
+  return null;
+}
+
+function mergeUsage(
+  a: UsageData | undefined,
+  b: UsageData | undefined,
+): UsageData | undefined {
+  if (!a && !b) return undefined;
+  return {
+    input_tokens: (a?.input_tokens ?? 0) + (b?.input_tokens ?? 0),
+    output_tokens: (a?.output_tokens ?? 0) + (b?.output_tokens ?? 0),
   };
 }
 
