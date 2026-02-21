@@ -358,6 +358,143 @@ QA-relevant observations: loading times, animations, dynamic content, tooltips, 
   };
 }
 
+/**
+ * Extract learnings from a completed test step.
+ * Captures gotchas from failures, timing observations, and UI interaction patterns.
+ */
+export async function extractTestStepLearning(
+  memory: MemoryManager,
+  domain: string,
+  taskId: string,
+  step: { action: string; expected: string; setup?: boolean },
+  verdict: "pass" | "fail" | "skip",
+  actual: string,
+  durationMs: number,
+): Promise<void> {
+  if (domain === "unknown" || domain === "about:blank" || verdict === "skip") return;
+
+  // Failed steps produce the most valuable learnings
+  if (verdict === "fail") {
+    const pattern = step.setup
+      ? `Setup step "${step.action.slice(0, 80)}" failed: ${actual.slice(0, 120)}`
+      : `Assertion "${step.action.slice(0, 80)}" failed — expected "${step.expected.slice(0, 80)}" but got: ${actual.slice(0, 120)}`;
+
+    await memory.addLearning({
+      domain,
+      category: "gotcha",
+      pattern,
+      confidence: 0.75,
+      source_task_id: taskId,
+    });
+  }
+
+  // Slow steps produce timing observations
+  if (verdict === "pass" && durationMs > 8000) {
+    await memory.addLearning({
+      domain,
+      category: "general",
+      pattern: `"${step.action.slice(0, 80)}" takes ~${Math.round(durationMs / 1000)}s — allow extra wait time`,
+      confidence: 0.7,
+      source_task_id: taskId,
+    });
+  }
+}
+
+/**
+ * After a full test run, distill high-level learnings from the results.
+ */
+export async function extractTestRunLearnings(
+  stagehand: Stagehand,
+  memory: MemoryManager,
+  domain: string,
+  testTitle: string,
+  steps: Array<{
+    step: { action: string; expected: string; setup?: boolean };
+    verdict: "pass" | "fail" | "skip";
+    actual: string;
+    durationMs: number;
+  }>,
+  overallVerdict: string,
+  taskId: string,
+): Promise<void> {
+  if (domain === "unknown" || domain === "about:blank") return;
+
+  const failedSteps = steps.filter((s) => s.verdict === "fail");
+  const passedSteps = steps.filter((s) => s.verdict === "pass");
+
+  // Record a recipe if the test passed fully
+  if (overallVerdict === "pass" && passedSteps.length > 1) {
+    const stepSummary = passedSteps
+      .map((s) => s.step.action.slice(0, 60))
+      .join(" -> ");
+    await memory.addLearning({
+      domain,
+      category: "recipe",
+      pattern: `Test "${testTitle.slice(0, 60)}": ${stepSummary}`,
+      confidence: 0.85,
+      source_task_id: taskId,
+    });
+  }
+
+  // Distill failure patterns into a single gotcha if multiple steps failed
+  if (failedSteps.length > 1) {
+    const failSummary = failedSteps
+      .map((s) => `"${s.step.action.slice(0, 40)}": ${s.actual.slice(0, 60)}`)
+      .join("; ");
+    await memory.addLearning({
+      domain,
+      category: "gotcha",
+      pattern: `Test "${testTitle.slice(0, 40)}" had ${failedSteps.length} failures: ${failSummary.slice(0, 300)}`,
+      confidence: 0.8,
+      source_task_id: taskId,
+    });
+  }
+
+  // Use AI to generate a concise test-specific learning if we have a mixed result
+  if (overallVerdict !== "pass" && failedSteps.length > 0) {
+    try {
+      const context = failedSteps
+        .map((s) => `Step: "${s.step.action}" | Expected: "${s.step.expected}" | Got: "${s.actual}"`)
+        .join("\n");
+
+      const extracted: unknown = await stagehand.extract(
+        `A QA test "${testTitle}" just ran on this website with verdict: ${overallVerdict}.\n` +
+        `Failed steps:\n${context}\n\n` +
+        `Generate ONE short, reusable tip (1 sentence) that would help future tests avoid the same issue.\n` +
+        `Focus on UI behavior, timing, or interaction patterns — not the specific test data.\n` +
+        `Return ONLY the tip string.`,
+      );
+
+      if (typeof extracted === "string" && extracted.length > 15) {
+        await memory.addLearning({
+          domain,
+          category: "general",
+          pattern: extracted.slice(0, 200),
+          confidence: 0.7,
+          source_task_id: taskId,
+        });
+      } else if (typeof extracted === "object" && extracted !== null) {
+        const val = Object.values(extracted as Record<string, unknown>)[0];
+        if (typeof val === "string" && val.length > 15) {
+          await memory.addLearning({
+            domain,
+            category: "general",
+            pattern: val.slice(0, 200),
+            confidence: 0.7,
+            source_task_id: taskId,
+          });
+        }
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
+  // Note: site knowledge page analysis for the final page state is handled
+  // by extractPostCommandLearnings (called by the orchestrator after every
+  // command, including tests) — no need to duplicate it here.
+}
+
 // --- Exploration message parser ---
 
 function extractSection(msg: string, heading: RegExp): string | null {

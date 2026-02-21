@@ -10,6 +10,7 @@ import { planTest } from "./test-planner.js";
 import { verifyStep } from "./verify.js";
 import { captureScreenshot, getCurrentUrl, getDomain } from "../browser/stagehand.js";
 import type { BrowserPool } from "../browser/pool.js";
+import { extractTestStepLearning, extractTestRunLearnings } from "./learning.js";
 import {
   saveReport,
   printReportSummary,
@@ -44,6 +45,8 @@ export async function runTest(
 ): Promise<TestRunResult> {
   const startTime = Date.now();
   let totalUsage: UsageData = { input_tokens: 0, output_tokens: 0 };
+  const domain = getDomain();
+  const testTaskId = "test-" + Date.now().toString(36);
 
   // ── Phase 1: Plan ─────────────────────────────────────────────────
   display.info("Planning test steps...");
@@ -152,6 +155,11 @@ export async function runTest(
       durationMs: stepDuration,
     });
 
+    // Learn from this step (fire-and-forget)
+    extractTestStepLearning(
+      memory, domain, testTaskId, step, verdict, verification.actual, stepDuration,
+    ).catch(() => {});
+
     if (verdict === "fail" && step.critical) {
       display.warn(
         `Critical step ${i + 1} failed — skipping remaining steps`,
@@ -214,6 +222,18 @@ export async function runTest(
   const reportId = await saveReport(report);
   printReportSummary(report);
   display.info(`Report saved: ${reportId}`);
+
+  // Post-test learning extraction (fire-and-forget)
+  extractTestRunLearnings(
+    stagehand, memory, domain, plan.title,
+    results.map((r) => ({
+      step: r.step,
+      verdict: r.verdict,
+      actual: r.actual,
+      durationMs: r.durationMs,
+    })),
+    verdict, testTaskId,
+  ).catch(() => {});
 
   return {
     message: report.summary,
