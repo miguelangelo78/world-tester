@@ -140,6 +140,21 @@ The Next.js frontend at `http://localhost:3000` provides full parity with the CL
 
 The frontend connects to the agent via WebSocket (`ws://localhost:3100`). All CLI commands work in the web terminal, including streaming chat responses, real-time test step progress, and browser state updates.
 
+### Dashboard Layouts
+
+Switch between five layouts using header icons or keyboard shortcuts:
+
+| Shortcut | Layout | Description |
+|----------|--------|-------------|
+| `Alt+1` | Vertical | Browser top, terminal bottom |
+| `Alt+2` | Horizontal | Browser left, terminal right |
+| `Alt+3` | Browser only | Full-screen browser view |
+| `Alt+4` | Terminal only | Full-screen terminal |
+| `Alt+5` | Floating | Browser full-screen with draggable terminal overlay |
+| `Alt+F` | Flip | Swap panel positions in split layouts |
+
+Layout choice persists in `localStorage`. The sidebar is collapsible via the toggle button.
+
 ### Browser Viewing
 
 The dashboard shows the browser in two modes:
@@ -194,6 +209,20 @@ Target a specific browser (and optionally a specific tab) by prefixing with `@na
 | `tab:new [url]` | Open a new tab (optionally navigate to a URL) |
 | `tab:switch <index or url>` | Switch active tab by index or URL fragment |
 | `tab:close [index]` | Close a tab (defaults to active tab) |
+
+### Conversation management
+
+The agent supports persistent conversations — switch between them, resume old ones, and all history is preserved.
+
+| Command | Description |
+|---------|-------------|
+| `conv` / `conversations` | List all conversations |
+| `conv:new [title]` | Create a new conversation and switch to it |
+| `conv:switch <id>` | Switch to an existing conversation |
+| `conv:rename <title>` | Rename the current conversation |
+| `conv:archive` | Archive the current conversation |
+
+Conversations auto-title based on the first command you send. All output is persisted — you can close the browser, restart the agent, and pick up where you left off.
 
 ### Built-in commands
 
@@ -351,9 +380,49 @@ Set these in `.env` at the project root:
 | `HEADLESS`                     | No       | `false` | Run browser in headless mode          |
 | `TARGET_URL`                   | No       | —       | Auto-navigate to this URL on start    |
 | `AGENT_PORT`                   | No       | `3100`  | WebSocket API server port             |
+| `WEB_PORT`                     | No       | `3000`  | Frontend web server port              |
 | `VNC`                          | No       | `false` | Start VNC server in Docker            |
 | `NEXT_PUBLIC_AGENT_WS_URL`    | No       | `ws://localhost:3100` | Agent WS URL for frontend  |
 | `NEXT_PUBLIC_VNC_WS_URL`      | No       | `ws://localhost:5901`  | VNC WS URL for frontend   |
+| `NEXT_PUBLIC_AGENT_HTTP_URL`  | No       | `http://localhost:3100` | Agent HTTP URL for screenshots |
+
+## Production Deployment
+
+For remote servers, ensure PostgreSQL is running and accessible, then:
+
+```bash
+# 1. Clone and configure
+git clone <repo-url> && cd world-tester
+cp .env.example .env
+# Edit .env: set GOOGLE_GENERATIVE_AI_API_KEY and DATABASE_URL
+
+# 2. Create the database (if it doesn't exist yet)
+psql "$DATABASE_URL" -c "SELECT 1" 2>/dev/null || \
+  psql "$(echo $DATABASE_URL | sed 's|/[^/]*$|/postgres|')" -c "CREATE DATABASE worldtester"
+
+# 3. Deploy via Docker
+npm run release
+
+# 4. Check logs
+npm run release:logs
+```
+
+If port 3000 is already in use, change the frontend port:
+
+```bash
+WEB_PORT=4000 npm run release
+```
+
+Or set `WEB_PORT=4000` in `.env` for a permanent change.
+
+### Ports
+
+| Port | Service | Configurable via |
+|------|---------|------------------|
+| 3000 | Frontend (Next.js) | `WEB_PORT` |
+| 3100 | Agent (WebSocket + HTTP) | `AGENT_PORT` |
+| 5900 | VNC raw TCP | — |
+| 5901 | VNC WebSocket proxy | — |
 
 ## Docker
 
