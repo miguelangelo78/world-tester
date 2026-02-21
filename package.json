@@ -1,38 +1,32 @@
 {
   "name": "world-tester",
   "version": "0.1.0",
-  "description": "AI-powered QA tester agent that interacts with web applications using Stagehand and Gemini",
-  "type": "module",
-  "main": "src/index.ts",
+  "private": true,
+  "description": "AI-powered QA tester — monorepo with agent service and web frontend",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "release": "docker compose down && docker compose up --build -d",
-    "release:vnc": "VNC=true docker compose down && VNC=true docker compose up --build -d",
-    "release:interactive": "docker compose run --rm --build app",
-    "release:interactive:vnc": "(while ! nc -z localhost 5900 2>/dev/null; do sleep 1; done && npm run vnc) & VNC=true docker compose run --rm --build --service-ports app",
+    "agent": "npm run start -w @world-tester/agent",
+    "agent:server": "npm run server -w @world-tester/agent",
+    "agent:dev": "npm run dev -w @world-tester/agent",
+    "web": "npm run dev -w @world-tester/web",
+    "web:build": "npm run build -w @world-tester/web",
+    "dev": "bash scripts/dev.sh",
+    "release": "AGENT_MODE=server docker compose down && AGENT_MODE=server docker compose up --build -d",
+    "release:vnc": "AGENT_MODE=server VNC=true docker compose down && AGENT_MODE=server VNC=true docker compose up --build -d",
+    "release:interactive": "docker compose run --rm --build agent",
+    "release:interactive:vnc": "(while ! nc -z localhost 5900 2>/dev/null; do sleep 1; done && npm run vnc) & VNC=true docker compose run --rm --build --service-ports agent",
+    "release:agent-only": "docker compose up --build -d agent",
     "release:logs": "docker compose logs -f",
     "release:down": "docker compose down",
     "vnc": "command -v vncviewer >/dev/null 2>&1 && vncviewer localhost:5900 || echo 'vncviewer not found. Install it: sudo apt install tigervnc-viewer'",
-    "postinstall": "prisma generate && npx playwright install chromium"
-  },
-  "dependencies": {
-    "@browserbasehq/stagehand": "^3.0.8",
-    "@google/generative-ai": "^0.24.1",
-    "@prisma/adapter-pg": "^7.4.1",
-    "@prisma/client": "^7.4.1",
-    "chalk": "^5.4.1",
-    "dotenv": "^16.4.7",
-    "pg": "^8.18.0",
-    "zod": "^3.24.2"
+    "db:generate": "npm run db:generate -w @world-tester/agent",
+    "db:push": "npm run db:push -w @world-tester/agent",
+    "postinstall": "npm run db:generate -w @world-tester/agent 2>/dev/null; npx -w @world-tester/agent playwright install chromium 2>/dev/null; true"
   },
   "devDependencies": {
-    "@types/node": "^22.13.4",
-    "@types/pg": "^8.16.0",
-    "prisma": "^7.4.1",
-    "tsx": "^4.19.3",
-    "typescript": "^5.7.3"
+    "concurrently": "^9.1.2"
   }
 }

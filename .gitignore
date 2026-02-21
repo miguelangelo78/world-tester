@@ -1,24 +1,10 @@
 node_modules/
 dist/
+.next/
 .env
 
-# Browser profiles & screenshots
-data/.browser-profile/
-data/.browser-profile-docker/
-data/screenshots/*
-!data/screenshots/.gitkeep
-
-# Legacy JSON data (replaced by Postgres, but may still exist on disk)
-data/site-knowledge/*
-data/task-history/*
-data/test-reports/*
-data/learnings.json
-data/session-log.json
-data/billing.json
-!data/.gitkeep
-!data/site-knowledge/.gitkeep
-!data/task-history/.gitkeep
-!data/test-reports/.gitkeep
+# Agent runtime data (browser profiles, screenshots, JSON data)
+**/data/
 
 # Docker
 pgdata/

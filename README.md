@@ -5,58 +5,153 @@ Built with [Stagehand](https://stagehand.dev), Google Gemini, and Playwright Chr
 
 World Tester behaves like a real QA engineer — it navigates websites, executes test steps, verifies outcomes, takes screenshots, learns from every interaction, and reports structured results. It remembers what it learns across sessions and gets faster over time.
 
-## Quick Start (Local)
+## Project Structure
+
+```
+world-tester/
+├── apps/
+│   ├── agent/          # Core agent service — CLI + WebSocket API
+│   └── web/            # Next.js frontend dashboard
+├── packages/
+│   └── shared/         # Shared TypeScript types and protocol definitions
+├── data/               # Screenshots, browser profiles (shared volume)
+├── docker-compose.yml  # Multi-service Docker setup
+└── .env                # Configuration (shared by both agent and web)
+```
+
+## Setup
+
+Prerequisites: **Node.js 22+** and **PostgreSQL** running locally.
 
 ```bash
-# Configure your environment
 cp .env.example .env
-# Edit .env and add your GOOGLE_GENERATIVE_AI_API_KEY and DATABASE_URL
+# Edit .env — set GOOGLE_GENERATIVE_AI_API_KEY (required) and DATABASE_URL (optional, defaults to local)
 
-# Install dependencies (also installs Chromium and generates Prisma client)
 npm install
-
-# Run (automatically syncs the database schema on first start)
-npm start
 ```
 
-Prerequisites: Node.js 22+, a PostgreSQL database.
+`npm install` automatically installs Chromium and generates the Prisma client. The database and schema are created automatically the first time the agent starts — no manual migration steps needed.
 
-## Quick Start (Docker)
+## Workflows
 
-Run the app inside Docker (connects to your host PostgreSQL):
+### 1. CLI Only
+
+The simplest path. The agent runs locally, the browser opens on your desktop, and you interact via your terminal.
 
 ```bash
-# Configure your environment
-cp .env.example .env
-# Edit .env and add your GOOGLE_GENERATIVE_AI_API_KEY and DATABASE_URL
-
-# Interactive CLI mode (build + run)
-npm run release:interactive
-
-# With VNC for visual debugging
-npm run release:interactive:vnc
-# Then in another terminal:
-npm run vnc
+npm run agent
 ```
 
-### npm scripts
+Best for: quick tasks, debugging, single-user sessions.
+
+### 2. Frontend + Agent (local dev)
+
+Both services run side by side. The browser renders to a virtual display (Xvfb) and streams to the frontend via VNC — no browser window opens on your desktop.
+
+```bash
+npm run dev
+```
+
+This starts:
+- **Xvfb** — virtual display for the browser
+- **x11vnc + websockify** — VNC server + WebSocket proxy so the frontend can stream the browser
+- **Agent server** → `localhost:3100` (WebSocket API)
+- **Next.js dev server** → `localhost:3000` (open in your browser)
+
+On first run, the script auto-installs any missing system packages (`xvfb`, `x11vnc`, `fluxbox`) via `sudo apt` — you'll be prompted for your password once.
+
+Everything you can do in the CLI is available in the dashboard. You can also start them independently:
+
+```bash
+npm run agent:server   # just the agent (browser opens on desktop)
+npm run web            # just the frontend
+```
+
+Best for: development, full dashboard experience, live browser viewing.
+
+### 3. Docker — Background
+
+The full stack runs containerized and detached. The agent runs headless with Xvfb.
+
+```bash
+npm run release            # agent + web, background
+npm run release:vnc        # same, with VNC on port 5900
+npm run release:agent-only # agent container only, no frontend
+```
+
+Then:
+
+```bash
+npm run release:logs   # tail logs
+npm run release:down   # tear everything down
+```
+
+Best for: production-like runs, CI, headless testing, remote servers.
+
+### 4. Docker — Interactive CLI
+
+The agent runs in Docker but gives you a terminal prompt. The browser runs headless inside the container.
+
+```bash
+npm run release:interactive          # CLI, no VNC
+npm run release:interactive:vnc      # CLI + auto-opens VNC viewer
+```
+
+Best for: running the CLI without installing dependencies locally.
+
+### 5. VNC (see the browser in Docker)
+
+When running Docker with VNC enabled, connect to the virtual display:
+
+```bash
+npm run vnc   # requires tigervnc-viewer: sudo apt install tigervnc-viewer
+```
+
+Works with `release:vnc`, `release:interactive:vnc`, or any Docker run with `VNC=true`.
+
+### All scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm start` | Run locally (auto-syncs DB schema on first start) |
-| `npm run release` | Docker: background mode |
-| `npm run release:vnc` | Docker: background + VNC |
-| `npm run release:interactive` | Docker: interactive CLI |
-| `npm run release:interactive:vnc` | Docker: interactive CLI + VNC |
-| `npm run vnc` | Connect to VNC viewer (install: `sudo apt install tigervnc-viewer`) |
+| `npm run agent` | Run agent CLI locally |
+| `npm run agent:server` | Run agent WebSocket API server |
+| `npm run web` | Run Next.js frontend (dev mode) |
+| `npm run dev` | Run both agent server + web frontend concurrently |
+| `npm run release` | Docker: full stack in background |
+| `npm run release:vnc` | Docker: full stack + VNC |
+| `npm run release:interactive` | Docker: interactive agent CLI |
+| `npm run release:interactive:vnc` | Docker: interactive agent CLI + VNC |
+| `npm run release:agent-only` | Docker: agent container only |
+| `npm run vnc` | Connect to VNC viewer |
 | `npm run release:logs` | Tail Docker container logs |
 | `npm run release:down` | Stop Docker containers |
+| `npm run db:generate` | Regenerate Prisma client |
+| `npm run db:push` | Push schema to database (happens automatically on start) |
+
+## Frontend
+
+The Next.js frontend at `http://localhost:3000` provides full parity with the CLI:
+
+- **Dashboard** — Live browser view (via noVNC), command terminal, cost summary
+- **History** — Task history from the database
+- **Reports** — Test reports with step-by-step results, pass/fail badges, and screenshots
+- **Knowledge** — Site knowledge and learnings browser
+- **Settings** — Agent connection status, cost/billing info, environment details
+
+The frontend connects to the agent via WebSocket (`ws://localhost:3100`). All CLI commands work in the web terminal, including streaming chat responses, real-time test step progress, and browser state updates.
+
+### Browser Viewing
+
+The dashboard shows the browser in two modes:
+
+- **Live** — Real-time view via noVNC (requires VNC enabled: `VNC=true`)
+- **Screenshots** — Timeline of captured screenshots from test runs
 
 Screenshots are automatically saved to `./data/screenshots/` on the host via volume mount.
 
 ## Commands
 
-All commands are entered in the interactive CLI. Prefix your input to select a mode, or just type naturally and the agent will figure it out.
+All commands are entered in the CLI or the web terminal. Prefix your input to select a mode, or just type naturally and the agent will figure it out.
 
 | Prefix   | Mode    | Description                                       |
 |----------|---------|---------------------------------------------------|
@@ -152,17 +247,12 @@ The agent can spawn and manage multiple independent browser instances, each with
 - **Target** any browser from any command: `@userB t: log in as admin`
 - **Target a specific tab** within a browser: `@userB:1 e: extract data`
 - **Tabs** within each browser: open, switch, close independently
-- **Smart routing** — the chat agent can also decide to spawn or switch browsers automatically when the task requires it (e.g., "open a new browser as userB")
+- **Smart routing** — the chat agent can also decide to spawn or switch browsers automatically
 - **Test runner** supports per-step browser targeting for cross-browser QA scenarios
-
-This enables testing scenarios like:
-- Verify that changes by user A are visible to user B
-- Test OAuth popup flows across tabs
-- Compare logged-in vs. logged-out views simultaneously
 
 ### Browser Automation (CUA)
 
-Uses Google Gemini's Computer Use Agent mode via Stagehand for visual reasoning. The agent sees screenshots of the browser, reasons about UI layout, and performs actions by coordinate. Includes a 4-level retry mechanism for stuck clicks (Playwright locator, DOM event dispatch, Stagehand act, direct JS click).
+Uses Google Gemini's Computer Use Agent mode via Stagehand for visual reasoning. The agent sees screenshots of the browser, reasons about UI layout, and performs actions by coordinate. Includes a 4-level retry mechanism for stuck clicks.
 
 ### Chat Mode
 
@@ -170,185 +260,127 @@ Conversational interface powered by Gemini Flash. The agent has a QA tester pers
 
 ### Smart Routing (Auto Mode)
 
-When you type without a prefix, the agent classifies your intent:
-- Pure questions and conversation stay in chat
-- Action requests are handed off to the appropriate browser mode
-- Context from recent conversation is preserved, so "try again" works correctly
+When you type without a prefix, the agent classifies your intent and routes to the appropriate mode. Context from recent conversation is preserved.
 
 ### Learning System
 
 The agent builds knowledge in two layers:
 
-- **Site Knowledge** (database): Structured data about each website — pages, forms, interactive elements, navigation paths, data displayed, common flows, tips, and known issues. Collected via the `l:` command or deep per-page analysis.
-
-- **Learnings** (database): Reusable behavioral patterns organized by category:
-  - **Navigation** — click trails and shortcuts to reach specific pages
-  - **Recipes** — step-by-step instructions for tasks that succeeded
-  - **Gotchas** — things that failed or behave unexpectedly
-  - **General** — timing observations, SPA behavior, etc.
-
-The agent learns passively from every command (background extraction after each task) and actively during `l:` learn sessions. Learnings use placeholders for dynamic content so they remain useful across users and sessions.
+- **Site Knowledge** (database): Structured data about each website — pages, forms, interactive elements, navigation paths, data displayed, common flows, tips, and known issues.
+- **Learnings** (database): Reusable behavioral patterns organized by category (navigation, recipes, gotchas, general).
 
 ### QA Ticket Testing (`test:` command)
 
 Structured end-to-end test execution:
 
-1. **Plan** — Decomposes a ticket into ordered test steps with expected outcomes (via Gemini Flash, or accepts pre-structured JSON input)
+1. **Plan** — Decomposes a ticket into ordered test steps with expected outcomes
 2. **Execute** — Runs each step through the CUA browser agent
-3. **Screenshot** — Captures before/after screenshots for every step (`data/screenshots/`)
+3. **Screenshot** — Captures before/after screenshots for every step
 4. **Verify** — AI-powered comparison of expected vs. actual page state
-5. **Report** — Structured report saved to the database with per-step pass/fail, overall verdict, timing, and cost
-
-```
-> test: Verify that changing a broker account's risk % persists after save
-```
-
-Or with structured input:
-
-```
-> test: {"title": "Risk % update", "steps": [{"action": "Navigate to /account", "expected": "Account Settings page loads", "critical": true}, {"action": "Click Edit on Muay 2", "expected": "Edit modal opens", "critical": true}]}
-```
-
-Multi-browser test steps can target specific browsers:
-
-```
-> test: {"title": "Cross-user visibility", "steps": [
-    {"action": "Create project X", "expected": "Project created", "critical": true, "browser": "admin"},
-    {"action": "Check projects list", "expected": "Project X visible", "critical": true, "browser": "viewer"}
-  ]}
-```
-
-Critical step failures abort remaining steps. Reports include a console summary and are persisted in the database.
+5. **Report** — Structured report saved to the database
 
 ### Cost Tracking
 
-Every API call is tracked:
-- **Per action** — tokens and cost shown after each command
-- **Per session** — running total for the current session
-- **Billing cycle** — persistent ledger in the database that accumulates across sessions and resets monthly
+Every API call is tracked per action, per session, and per billing cycle.
 
 ### Session Memory
 
-Conversation history and task results persist across sessions in the database. When the agent starts, it loads the previous session's context so it remembers past interactions.
+Conversation history and task results persist across sessions in the database.
 
 ## Architecture
 
 ```
-src/
-├── index.ts                 # CLI loop and startup
-├── db.ts                    # Prisma client singleton + auto-schema sync
-├── config/
-│   ├── index.ts             # Load .env config
-│   └── types.ts             # AppConfig interface
-├── cli/
-│   ├── parser.ts            # Command prefix parsing
-│   └── display.ts           # Formatted console output
-├── browser/
-│   ├── pool.ts              # BrowserPool + BrowserInstance (multi-browser/tab management)
-│   └── stagehand.ts         # Chrome launch helpers, Stagehand logger, pool-backed compat layer
+apps/
 ├── agent/
-│   ├── orchestrator.ts      # Central command dispatcher
-│   ├── modes.ts             # extract, act, task, observe, goto, search, ask
-│   ├── chat.ts              # Gemini Flash chat + smart routing
-│   ├── learning.ts          # Site exploration and post-command learning
-│   ├── system-prompt.ts     # Dynamic system prompt builder
-│   ├── test-planner.ts      # Ticket decomposition into test steps
-│   ├── test-runner.ts       # Plan → execute → verify → report loop
-│   ├── test-report.ts       # Database report persistence + console summary
-│   ├── test-types.ts        # TestPlan, TestStep, TestReport interfaces
-│   └── verify.ts            # AI-powered expected vs actual verification
-├── memory/
-│   ├── manager.ts           # Prisma-backed persistence for all knowledge
-│   └── types.ts             # SiteKnowledge, Learning, TaskRecord, etc.
-└── cost/
-    ├── tracker.ts           # Token counting, cost calculation, billing ledger
-    └── pricing.ts           # Per-model token pricing
-
-prisma/
-└── schema.prisma            # Database schema (PostgreSQL)
-
-docker/
-└── entrypoint.sh            # Xvfb, optional VNC, localhost rewriting, app start
+│   └── src/
+│       ├── index.ts                 # CLI entry point
+│       ├── server.ts                # WebSocket API server entry point
+│       ├── core.ts                  # Shared agent initialization (createAgentCore)
+│       ├── output-sink.ts           # Output abstraction (CLI vs WebSocket)
+│       ├── cli-sink.ts              # CLI implementation of OutputSink
+│       ├── db.ts                    # Prisma client + auto-schema sync
+│       ├── config/                  # Environment config loading
+│       ├── cli/                     # Command parser, display formatting
+│       ├── browser/                 # BrowserPool, BrowserInstance, Stagehand helpers
+│       ├── agent/                   # Orchestrator, modes, chat, learning, test runner
+│       ├── memory/                  # Prisma-backed knowledge persistence
+│       └── cost/                    # Token tracking, pricing, billing ledger
+├── web/
+│   └── src/
+│       ├── app/                     # Next.js App Router pages
+│       │   ├── page.tsx             # Dashboard (browser viewer + terminal)
+│       │   ├── history/             # Task history
+│       │   ├── reports/             # Test reports
+│       │   ├── knowledge/           # Site knowledge + learnings
+│       │   ├── settings/            # Configuration
+│       │   └── api/                 # Screenshot serving API
+│       ├── components/              # React components
+│       │   ├── command-terminal.tsx  # Interactive command input + output
+│       │   ├── browser-viewer.tsx   # noVNC live view + tab bar
+│       │   ├── novnc-canvas.tsx     # noVNC wrapper
+│       │   ├── agent-provider.tsx   # WebSocket context provider
+│       │   └── ...                  # View components for each page
+│       └── hooks/
+│           └── use-agent-socket.ts  # WebSocket connection + message handling
+packages/
+└── shared/
+    └── src/
+        └── types.ts                 # WebSocket protocol, shared domain types
 ```
 
 ### Data Storage
 
-All structured data (site knowledge, learnings, task records, session history, billing, test reports) is stored in **PostgreSQL** via **Prisma ORM**.
-
-Filesystem storage is used only for binary/large files:
+All structured data is stored in **PostgreSQL** via **Prisma ORM**. Filesystem is used for binary files only:
 
 ```
 data/
 ├── screenshots/             # Before/after screenshots from test runs
-├── .browser-profile/        # Chromium user data for the default "main" browser
-├── .browser-profile-<name>/ # Isolated Chromium profiles for additional browser instances
-└── .browser-profile-docker/ # Chromium user data for Docker runs (separate to avoid lock conflicts)
+├── .browser-profile/        # Chromium user data for the default browser
+├── .browser-profile-<name>/ # Isolated profiles for additional browsers
+└── .browser-profile-docker/ # Docker-specific profile (avoids lock conflicts)
 ```
 
 ## Configuration
 
-Set these in `.env`:
+Set these in `.env` at the project root:
 
 | Variable                       | Required | Default | Description                           |
 |--------------------------------|----------|---------|---------------------------------------|
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Yes      | —       | Google AI API key                     |
-| `DATABASE_URL`                 | Yes      | See below | PostgreSQL connection string         |
+| `DATABASE_URL`                 | No       | `postgresql://postgres:postgres@localhost:5432/worldtester` | PostgreSQL connection string |
 | `HEADLESS`                     | No       | `false` | Run browser in headless mode          |
 | `TARGET_URL`                   | No       | —       | Auto-navigate to this URL on start    |
-| `VNC`                          | No       | `false` | Start VNC server in Docker (port 5900)|
-
-Default `DATABASE_URL`: `postgresql://postgres:postgres@localhost:5432/worldtester`
+| `AGENT_PORT`                   | No       | `3100`  | WebSocket API server port             |
+| `VNC`                          | No       | `false` | Start VNC server in Docker            |
+| `NEXT_PUBLIC_AGENT_WS_URL`    | No       | `ws://localhost:3100` | Agent WS URL for frontend  |
+| `NEXT_PUBLIC_VNC_WS_URL`      | No       | `ws://localhost:5901`  | VNC WS URL for frontend   |
 
 ## Docker
 
-The Docker setup runs the app with a headless Chromium browser inside a virtual display (Xvfb). VNC can be enabled for visual debugging.
+The Docker setup runs the full stack:
 
-### How it works
+- **agent** container: Headless Chromium in Xvfb, WebSocket API on port 3100, optional VNC on 5900
+- **web** container: Next.js frontend on port 3000
 
-- The container connects to your **host PostgreSQL** — `localhost` and `127.0.0.1` in `DATABASE_URL` and `TARGET_URL` are automatically rewritten to `host.docker.internal` by the entrypoint
-- Screenshots are volume-mounted to `./data/screenshots/` for host access
-- Browser profile is stored in `./data/.browser-profile-docker/` (separate from local runs to avoid lock conflicts)
-- Stale Chromium lock files are cleaned automatically on container start
-
-### VNC
-
-To see the browser visually while running in Docker:
-
-1. Start with VNC: `npm run release:interactive:vnc` (or `npm run release:vnc` for background)
-2. Connect: `npm run vnc` (requires `tigervnc-viewer` — install with `sudo apt install tigervnc-viewer`)
-3. On Windows/macOS: use any VNC client (e.g. RealVNC Viewer) and connect to `localhost:5900`
-
-### Running without Docker
-
-Just set `DATABASE_URL` in `.env` pointing to a PostgreSQL instance and run `npm start`. The app auto-syncs the database schema on startup.
+The agent connects to your host PostgreSQL — `localhost` in `DATABASE_URL` is automatically rewritten to `host.docker.internal`.
 
 ## Tech Stack
 
-- **[Stagehand](https://stagehand.dev)** — AI browser automation framework (CUA mode for visual reasoning, act/extract/observe primitives)
+- **[Stagehand](https://stagehand.dev)** — AI browser automation (CUA mode, act/extract/observe)
 - **Google Gemini** — `gemini-2.5-computer-use-preview-10-2025` for browser automation, `gemini-2.5-flash` for chat and planning
-- **Playwright Chromium** — Local browser with stealth flags, custom launch bypassing chrome-launcher for WSL2 compatibility
+- **Playwright Chromium** — Local browser with stealth flags
 - **Node.js + TypeScript** — Runtime and language, executed via `tsx`
-- **PostgreSQL + Prisma ORM** — All structured data persisted in Postgres via Prisma
-- **Docker + Docker Compose** — Containerized execution with Xvfb and optional VNC
+- **PostgreSQL + Prisma ORM** — All structured data persistence
+- **Next.js + React** — Frontend dashboard with App Router
+- **Tailwind CSS** — Styling with dark theme
+- **noVNC** — Live browser streaming to the frontend
+- **WebSocket** — Real-time agent-to-frontend communication
+- **npm workspaces** — Monorepo management
+- **Docker + Docker Compose** — Multi-service containerized execution
 
 ### Cost Principle
 
-Everything is free and open-source except the AI model API. No Browserbase, no paid search APIs (web search happens via in-browser Google navigation), no paid npm packages.
-
-## CLI Prompt
-
-The prompt dynamically shows context:
-
-```
-[https://myapp.com/settings]              # single browser, single tab
-> 
-
-[main|https://myapp.com/settings (2 tabs)] # single browser, multiple tabs
-> 
-
-[admin|https://myapp.com/admin (3 tabs)]   # multiple browsers — shows active browser name
-> 
-```
+Everything is free and open-source except the AI model API. No Browserbase, no paid search APIs, no paid npm packages.
 
 ## Future Plans
 
@@ -356,3 +388,4 @@ The prompt dynamically shows context:
 - Slack and platform integrations
 - Voice input/output
 - HTML/Markdown test report export
+- noVNC WebSocket proxy for VNC-less frontend viewing

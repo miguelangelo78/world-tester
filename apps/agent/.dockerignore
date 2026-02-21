@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.next/
 .env
 data/.browser-profile/
 data/.browser-profile-docker/

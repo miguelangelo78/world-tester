@@ -1,6 +1,8 @@
 services:
-  app:
-    build: .
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -9,10 +11,26 @@ services:
       HEADLESS: ${HEADLESS:-true}
       TARGET_URL: ${TARGET_URL:-}
       VNC: ${VNC:-false}
+      AGENT_MODE: ${AGENT_MODE:-cli}
+      AGENT_PORT: 3100
     ports:
+      - "3100:3100"
       - "5900:5900"
+      - "5901:5901"
     volumes:
       - ./data/screenshots:/app/data/screenshots
       - ./data/.browser-profile-docker:/app/data/.browser-profile
     stdin_open: true
     tty: true
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_AGENT_WS_URL: ${NEXT_PUBLIC_AGENT_WS_URL:-ws://localhost:3100}
+      NEXT_PUBLIC_VNC_WS_URL: ${NEXT_PUBLIC_VNC_WS_URL:-ws://localhost:5901}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - agent
