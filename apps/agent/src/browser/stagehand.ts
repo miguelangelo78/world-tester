@@ -59,6 +59,8 @@ export function launchChrome(
   return new Promise((resolve, reject) => {
     fs.mkdirSync(opts.profileDir, { recursive: true });
 
+    const useKiosk = process.env.BROWSER_KIOSK === "1" || process.env.BROWSER_KIOSK === "true";
+
     const args = [
       "--no-sandbox",
       "--disable-dev-shm-usage",
@@ -74,7 +76,7 @@ export function launchChrome(
       "--disable-background-timer-throttling",
       "--disable-backgrounding-occluded-windows",
       "--disable-renderer-backgrounding",
-      "--kiosk",
+      ...(useKiosk ? ["--kiosk"] : []),
     ];
 
     if (opts.headless) {

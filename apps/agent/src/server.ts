@@ -208,7 +208,13 @@ async function handleCommand(
       payload: {
         action: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
         session,
-        billing: { costUsd: billing.costUsd, sessionCount: billing.sessionCount },
+        billing: {
+          costUsd: billing.costUsd,
+          inputTokens: billing.inputTokens,
+          outputTokens: billing.outputTokens,
+          sessionCount: billing.sessionCount,
+          cycleStart: billing.cycleStart,
+        },
       } satisfies CostUpdatePayload,
     });
     broadcast({
@@ -353,7 +359,13 @@ async function handleCommand(
     payload: {
       action: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
       session,
-      billing: { costUsd: billing.costUsd, sessionCount: billing.sessionCount },
+      billing: {
+        costUsd: billing.costUsd,
+        inputTokens: billing.inputTokens,
+        outputTokens: billing.outputTokens,
+        sessionCount: billing.sessionCount,
+        cycleStart: billing.cycleStart,
+      },
     } satisfies CostUpdatePayload,
   });
 

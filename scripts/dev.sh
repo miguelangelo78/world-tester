@@ -124,6 +124,7 @@ echo ""
 
 # Browser renders to Xvfb (not headless, not visible on desktop)
 export HEADLESS=false
+export BROWSER_KIOSK=1
 
 exec npx concurrently \
   --names "agent,web" \

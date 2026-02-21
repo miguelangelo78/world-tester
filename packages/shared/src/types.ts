@@ -54,7 +54,7 @@ export interface StepUpdatePayload {
 export interface CostUpdatePayload {
   action: { inputTokens: number; outputTokens: number; costUsd: number };
   session: { inputTokens: number; outputTokens: number; costUsd: number };
-  billing: { costUsd: number; sessionCount: number };
+  billing: { costUsd: number; inputTokens: number; outputTokens: number; sessionCount: number; cycleStart: string };
 }
 
 export interface BrowserInfo {

@@ -10,6 +10,7 @@ rm -f /app/data/.browser-profile/SingletonLock \
 # Start Xvfb virtual display sized to match the browser viewport
 Xvfb :99 -screen 0 1288x711x24 -ac +extension GLX +render -noreset &
 export DISPLAY=:99
+export BROWSER_KIOSK=1
 
 sleep 1
 
