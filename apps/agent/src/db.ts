@@ -44,7 +44,8 @@ async function ensureDatabaseExists(): Promise<void> {
 export async function setupDatabase(): Promise<void> {
   try {
     await ensureDatabaseExists();
-  } catch {
+  } catch (err) {
+    console.error(err);
     throw new Error(
       `Cannot connect to PostgreSQL. Check DATABASE_URL in .env.\n` +
       `Current: ${connectionString.replace(/\/\/.*@/, "//***@")}`,
