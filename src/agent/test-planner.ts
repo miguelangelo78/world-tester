@@ -48,6 +48,20 @@ export async function planTest(
     `- Include 3-10 steps. Be thorough but don't over-decompose.`,
     `- The first step is usually navigation — critical AND setup.`,
     `- The final steps should be the actual assertions that verify the test goal — critical but NOT setup.`,
+    ``,
+    `CRITICAL — agent capabilities:`,
+    `- The browser agent is VISUAL. It can see the page and interact (click, type, scroll, navigate) but CANNOT:`,
+    `  - Inspect DOM properties, CSS computed styles, or JavaScript state`,
+    `  - Read hex color codes, font sizes, z-index values, or any CSS property programmatically`,
+    `  - Execute JavaScript or access the browser DevTools`,
+    `- For visual properties (colors, sizes, visibility, layout), the agent can VISUALLY OBSERVE and describe what it sees.`,
+    `- Frame actions as visual observations, NOT technical inspections. Examples:`,
+    `  - GOOD: "Visually verify that the logo appears orange in color"`,
+    `  - BAD: "Get the computed 'fill' color property of the SVG element"`,
+    `  - GOOD: "Verify the button text is visible and readable"`,
+    `  - BAD: "Check the font-size CSS property of the button element"`,
+    `  - GOOD: "Confirm the error message is displayed in red"`,
+    `  - BAD: "Inspect the color CSS property of the error element"`,
   ].join("\n");
 
   const model = genAI.getGenerativeModel({

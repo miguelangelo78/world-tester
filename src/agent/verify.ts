@@ -77,6 +77,14 @@ async function verifyViaFlash(
     `  "${cuaMessage.slice(0, 800)}"`,
     ``,
     `Based on the agent's report, did the expected outcome occur?`,
+    ``,
+    `IMPORTANT judgment rules:`,
+    `- The agent is a VISUAL browser agent. It cannot inspect CSS properties, DOM attributes, or run JavaScript.`,
+    `- If the agent visually confirmed the expected outcome (e.g., "the logo appears orange", "the text is visible"),`,
+    `  that counts as a PASS — even if the agent also mentioned it couldn't use a specific technical method.`,
+    `- Focus on whether the SUBSTANCE of the expected outcome was confirmed, not the METHOD used to confirm it.`,
+    `- A visual observation like "appears to be orange" IS valid evidence for "color is orange".`,
+    ``,
     `Respond with EXACTLY one JSON object (no markdown, no backticks):`,
     `{"passed": true/false, "actual": "what actually happened", "evidence": "specific detail from the report that proves/disproves"}`,
   ].join("\n");
@@ -135,15 +143,23 @@ function heuristicVerify(cuaMessage: string, expected: string): VerifyResult {
   const matched = keywords.filter((kw) => msg.includes(kw));
   const ratio = keywords.length > 0 ? matched.length / keywords.length : 0;
 
+  // Check for hard failure signals, but discount "tool limitation" complaints
+  // when the agent still visually confirmed the outcome (e.g., "cannot get the
+  // computed fill property ... but it appears to be orange").
+  const hasVisualConfirmation =
+    /(?:appears to be|visually.+(?:is|looks|appears)|based on.+(?:screenshot|visual)|can see|is visible|is displayed)/i.test(cuaMessage);
+
   const hasFailureSignals =
     /(?:failed|error|unable|could not|couldn't|not found|not visible|did not)/i.test(cuaMessage);
 
-  const passed = ratio > 0.4 && !hasFailureSignals;
+  const effectiveFailure = hasFailureSignals && !hasVisualConfirmation;
+
+  const passed = ratio > 0.4 && !effectiveFailure;
 
   return {
     passed,
     actual: cuaMessage.slice(0, 300),
-    evidence: `Heuristic: ${matched.length}/${keywords.length} keywords matched${hasFailureSignals ? ", but failure signals detected" : ""}`,
+    evidence: `Heuristic: ${matched.length}/${keywords.length} keywords matched${effectiveFailure ? ", failure signals detected" : ""}${hasVisualConfirmation ? ", visual confirmation present" : ""}`,
   };
 }
 
