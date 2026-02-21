@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+data/.browser-profile/
+
+# Keep data directory structure but ignore contents
+data/site-knowledge/*
+data/task-history/*
+data/learnings.json
+data/session-log.json
+!data/.gitkeep
+!data/site-knowledge/.gitkeep
+!data/task-history/.gitkeep
+billing.json
