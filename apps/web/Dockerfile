@@ -18,8 +18,9 @@ COPY apps/web/ apps/web/
 # Build Next.js
 RUN cd apps/web && npx next build
 
-ENV PORT=3000
-EXPOSE 3000
+ARG WEB_PORT=3000
+ENV PORT=${WEB_PORT}
+EXPOSE ${WEB_PORT}
 
 WORKDIR /app/apps/web
 

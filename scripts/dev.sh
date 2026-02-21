@@ -119,7 +119,8 @@ fi
 
 echo ""
 echo "[dev] VNC ready — raw :${VNC_PORT}, WebSocket :${VNC_WS_PORT}"
-echo "[dev] Open http://localhost:3000 to see the browser"
+WEB_PORT=${WEB_PORT:-3000}
+echo "[dev] Open http://localhost:${WEB_PORT} to see the browser"
 echo ""
 
 # Browser renders to Xvfb (not headless, not visible on desktop)
@@ -130,4 +131,4 @@ exec npx concurrently \
   --names "agent,web" \
   --prefix-colors "cyan,magenta" \
   "npm run agent:server" \
-  "npm run web"
+  "PORT=${WEB_PORT} npm run web"
