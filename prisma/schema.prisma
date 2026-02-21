@@ -1,0 +1,84 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model SiteKnowledge {
+  id              String   @id @default(cuid())
+  domain          String   @unique
+  lastUpdated     DateTime @updatedAt
+  siteDescription String?
+  techStack       String[]
+  authMethod      String?
+  pages           Json     @default("{}")
+  siteMap         String[]
+  commonFlows     String[]
+  knownIssues     String[]
+  tips            String[]
+}
+
+model TaskRecord {
+  id          String   @id
+  timestamp   DateTime
+  command     String
+  instruction String
+  mode        String
+  domain      String?
+  steps       String[]
+  outcome     String
+  result      String?
+  durationMs  Int
+  costUsd     Float
+  tokensIn    Int
+  tokensOut   Int
+}
+
+model Learning {
+  id           String   @id
+  domain       String
+  category     String
+  pattern      String
+  confidence   Float
+  sourceTaskId String
+  created      DateTime
+
+  @@unique([domain, pattern])
+}
+
+model SessionEntry {
+  id        Int      @id @default(autoincrement())
+  sessionId String
+  timestamp DateTime
+  role      String
+  content   String
+  mode      String?
+  costUsd   Float?
+
+  @@index([sessionId])
+}
+
+model BillingLedger {
+  id                String   @id @default("singleton")
+  cycleStart        DateTime
+  cycleDayOfMonth   Int      @default(1)
+  totalCostUsd      Float    @default(0)
+  totalInputTokens  Int      @default(0)
+  totalOutputTokens Int      @default(0)
+  sessionCount      Int      @default(0)
+  lastUpdated       DateTime @updatedAt
+}
+
+model TestReport {
+  id         String   @id @default(cuid())
+  title      String
+  timestamp  DateTime
+  domain     String
+  steps      Json
+  verdict    String
+  summary    String
+  durationMs Int
+  costUsd    Float
+}

@@ -25,7 +25,7 @@ import * as display from "../cli/display.js";
 
 export interface TestRunResult extends ModeResult {
   report: TestReport;
-  reportPath: string;
+  reportId: string;
 }
 
 /**
@@ -176,16 +176,16 @@ export async function runTest(
     costUsd: costSnapshot.costUsd,
   };
 
-  const reportPath = saveReport(report);
+  const reportId = await saveReport(report);
   printReportSummary(report);
-  display.info(`Report saved: ${reportPath}`);
+  display.info(`Report saved: ${reportId}`);
 
   return {
     message: report.summary,
     usage: totalUsage,
     success: verdict === "pass",
     report,
-    reportPath,
+    reportId,
   };
 }
 

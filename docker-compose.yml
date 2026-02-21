@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    network_mode: host
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/worldtester}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY}
+      HEADLESS: ${HEADLESS:-true}
+      TARGET_URL: ${TARGET_URL:-}
+      VNC: ${VNC:-false}
+    volumes:
+      - ./data/screenshots:/app/data/screenshots
+      - ./data/.browser-profile-docker:/app/data/.browser-profile
+    stdin_open: true
+    tty: true

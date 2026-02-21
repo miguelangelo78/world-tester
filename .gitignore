@@ -1,14 +1,29 @@
 node_modules/
 dist/
 .env
-data/.browser-profile/
 
-# Keep data directory structure but ignore contents
+# Browser profile & screenshots
+data/.browser-profile/
+data/screenshots/*
+!data/screenshots/.gitkeep
+
+# Legacy JSON data (replaced by Postgres, but may still exist on disk)
 data/site-knowledge/*
 data/task-history/*
+data/test-reports/*
 data/learnings.json
 data/session-log.json
+data/billing.json
 !data/.gitkeep
 !data/site-knowledge/.gitkeep
 !data/task-history/.gitkeep
-billing.json
+!data/test-reports/.gitkeep
+
+# Docker
+pgdata/
+
+# Prisma
+prisma/migrations/
+
+# Plan files
+prompt.md

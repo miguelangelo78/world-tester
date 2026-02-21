@@ -1,175 +1,195 @@
-import fs from "fs/promises";
-import path from "path";
+import prisma from "../db.js";
 import {
   SiteKnowledge,
   TaskRecord,
-  LearningsStore,
   Learning,
-  SessionLog,
   SessionEntry,
 } from "./types.js";
 
 export class MemoryManager {
-  private dataDir: string;
-  private sessionLog: SessionLog;
+  private sessionId: string;
 
-  constructor(dataDir: string) {
-    this.dataDir = dataDir;
-    this.sessionLog = {
-      sessionId: Date.now().toString(36),
-      started: new Date().toISOString(),
-      entries: [],
-    };
+  constructor(_dataDir: string) {
+    this.sessionId = Date.now().toString(36);
   }
 
   async init(): Promise<void> {
-    await fs.mkdir(path.join(this.dataDir, "site-knowledge"), {
-      recursive: true,
-    });
-    await fs.mkdir(path.join(this.dataDir, "task-history"), {
-      recursive: true,
-    });
+    // Prisma handles table creation via `prisma db push`; nothing to do here.
   }
 
   // --- Site Knowledge ---
 
   async getSiteKnowledge(domain: string): Promise<SiteKnowledge | null> {
-    const filePath = path.join(
-      this.dataDir,
-      "site-knowledge",
-      `${sanitizeFilename(domain)}.json`,
-    );
-    try {
-      const raw = await fs.readFile(filePath, "utf-8");
-      const data = JSON.parse(raw) as Partial<SiteKnowledge>;
-      return {
-        domain: data.domain ?? domain,
-        lastUpdated: data.lastUpdated ?? new Date().toISOString(),
-        pages: data.pages ?? {},
-        siteMap: data.siteMap ?? [],
-        commonFlows: data.commonFlows ?? [],
-        knownIssues: data.knownIssues ?? [],
-        tips: data.tips ?? [],
-        siteDescription: data.siteDescription,
-        techStack: data.techStack,
-        authMethod: data.authMethod,
-      };
-    } catch {
-      return null;
-    }
+    const row = await prisma.siteKnowledge.findUnique({ where: { domain } });
+    if (!row) return null;
+    return {
+      domain: row.domain,
+      lastUpdated: row.lastUpdated.toISOString(),
+      siteDescription: row.siteDescription ?? undefined,
+      techStack: row.techStack,
+      authMethod: row.authMethod ?? undefined,
+      pages: (row.pages as unknown as SiteKnowledge["pages"]) ?? {},
+      siteMap: row.siteMap,
+      commonFlows: row.commonFlows,
+      knownIssues: row.knownIssues,
+      tips: row.tips,
+    };
   }
 
   async saveSiteKnowledge(knowledge: SiteKnowledge): Promise<void> {
-    const filePath = path.join(
-      this.dataDir,
-      "site-knowledge",
-      `${sanitizeFilename(knowledge.domain)}.json`,
-    );
-    knowledge.lastUpdated = new Date().toISOString();
-    await fs.writeFile(filePath, JSON.stringify(knowledge, null, 2));
+    await prisma.siteKnowledge.upsert({
+      where: { domain: knowledge.domain },
+      update: {
+        siteDescription: knowledge.siteDescription ?? null,
+        techStack: knowledge.techStack ?? [],
+        authMethod: knowledge.authMethod ?? null,
+        pages: knowledge.pages as object,
+        siteMap: knowledge.siteMap,
+        commonFlows: knowledge.commonFlows,
+        knownIssues: knowledge.knownIssues,
+        tips: knowledge.tips,
+      },
+      create: {
+        domain: knowledge.domain,
+        siteDescription: knowledge.siteDescription ?? null,
+        techStack: knowledge.techStack ?? [],
+        authMethod: knowledge.authMethod ?? null,
+        pages: knowledge.pages as object,
+        siteMap: knowledge.siteMap,
+        commonFlows: knowledge.commonFlows,
+        knownIssues: knowledge.knownIssues,
+        tips: knowledge.tips,
+      },
+    });
   }
 
   // --- Task History ---
 
   async saveTaskRecord(record: TaskRecord): Promise<void> {
-    const slug = record.instruction
-      .slice(0, 40)
-      .replace(/[^a-zA-Z0-9]+/g, "-")
-      .toLowerCase();
-    const filename = `${record.timestamp.replace(/[:.]/g, "-")}-${slug}.json`;
-    const filePath = path.join(this.dataDir, "task-history", filename);
-    await fs.writeFile(filePath, JSON.stringify(record, null, 2));
+    await prisma.taskRecord.create({
+      data: {
+        id: record.id,
+        timestamp: new Date(record.timestamp),
+        command: record.command,
+        instruction: record.instruction,
+        mode: record.mode,
+        domain: record.domain ?? null,
+        steps: record.steps,
+        outcome: record.outcome,
+        result: record.result ?? null,
+        durationMs: record.duration_ms,
+        costUsd: record.cost_usd,
+        tokensIn: record.tokens_in,
+        tokensOut: record.tokens_out,
+      },
+    });
   }
 
   async getRecentTasks(limit = 10): Promise<TaskRecord[]> {
-    const dir = path.join(this.dataDir, "task-history");
-    try {
-      const files = await fs.readdir(dir);
-      const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse().slice(0, limit);
-      const tasks: TaskRecord[] = [];
-      for (const file of jsonFiles) {
-        const raw = await fs.readFile(path.join(dir, file), "utf-8");
-        tasks.push(JSON.parse(raw));
-      }
-      return tasks;
-    } catch {
-      return [];
-    }
+    const rows = await prisma.taskRecord.findMany({
+      orderBy: { timestamp: "desc" },
+      take: limit,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      timestamp: r.timestamp.toISOString(),
+      command: r.command,
+      instruction: r.instruction,
+      mode: r.mode,
+      domain: r.domain ?? undefined,
+      steps: r.steps,
+      outcome: r.outcome as TaskRecord["outcome"],
+      result: r.result ?? undefined,
+      duration_ms: r.durationMs,
+      cost_usd: r.costUsd,
+      tokens_in: r.tokensIn,
+      tokens_out: r.tokensOut,
+    }));
   }
 
   // --- Learnings ---
 
   async getLearnings(domain?: string): Promise<Learning[]> {
-    const store = await this.loadLearningsStore();
-    if (!domain) return store.learnings;
-    return store.learnings.filter((l) => l.domain === domain || l.domain === "*");
+    const where = domain
+      ? { OR: [{ domain }, { domain: "*" }] }
+      : undefined;
+    const rows = await prisma.learning.findMany({ where });
+    return rows.map((r) => ({
+      id: r.id,
+      domain: r.domain,
+      category: r.category as Learning["category"],
+      pattern: r.pattern,
+      confidence: r.confidence,
+      source_task_id: r.sourceTaskId,
+      created: r.created.toISOString(),
+    }));
   }
 
   async addLearning(learning: Omit<Learning, "id" | "created">): Promise<void> {
-    const store = await this.loadLearningsStore();
-    const isDuplicate = store.learnings.some(
-      (l) => l.domain === learning.domain && l.pattern === learning.pattern,
-    );
-    if (isDuplicate) return;
-
-    store.learnings.push({
-      ...learning,
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      created: new Date().toISOString(),
-    });
-    store.lastUpdated = new Date().toISOString();
-    await this.saveLearningsStore(store);
-  }
-
-  private async loadLearningsStore(): Promise<LearningsStore> {
-    const filePath = path.join(this.dataDir, "learnings.json");
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     try {
-      const raw = await fs.readFile(filePath, "utf-8");
-      const store = JSON.parse(raw) as LearningsStore;
-      for (const l of store.learnings) {
-        if (!l.category) l.category = "general";
-      }
-      return store;
-    } catch {
-      return { learnings: [], lastUpdated: new Date().toISOString() };
+      await prisma.learning.create({
+        data: {
+          id,
+          domain: learning.domain,
+          category: learning.category,
+          pattern: learning.pattern,
+          confidence: learning.confidence,
+          sourceTaskId: learning.source_task_id,
+          created: new Date(),
+        },
+      });
+    } catch (err: unknown) {
+      // Unique constraint violation = duplicate, silently ignore
+      const code = (err as { code?: string }).code;
+      if (code === "P2002") return;
+      throw err;
     }
-  }
-
-  private async saveLearningsStore(store: LearningsStore): Promise<void> {
-    const filePath = path.join(this.dataDir, "learnings.json");
-    await fs.writeFile(filePath, JSON.stringify(store, null, 2));
   }
 
   // --- Session Log ---
 
   async loadPreviousSession(): Promise<SessionEntry[]> {
-    const filePath = path.join(this.dataDir, "session-log.json");
-    try {
-      const raw = await fs.readFile(filePath, "utf-8");
-      const prev = JSON.parse(raw) as SessionLog;
-      return prev.entries ?? [];
-    } catch {
-      return [];
-    }
+    const rows = await prisma.sessionEntry.findMany({
+      orderBy: { timestamp: "desc" },
+      take: 20,
+    });
+    // Reverse so they're chronological
+    rows.reverse();
+    return rows.map((r) => ({
+      timestamp: r.timestamp.toISOString(),
+      role: r.role as SessionEntry["role"],
+      content: r.content,
+      mode: r.mode ?? undefined,
+      cost_usd: r.costUsd ?? undefined,
+    }));
   }
 
   addSessionEntry(entry: Omit<SessionEntry, "timestamp">): void {
-    this.sessionLog.entries.push({
-      ...entry,
-      timestamp: new Date().toISOString(),
-    });
+    // Fire-and-forget DB write so it doesn't block the CLI
+    prisma.sessionEntry
+      .create({
+        data: {
+          sessionId: this.sessionId,
+          timestamp: new Date(),
+          role: entry.role,
+          content: entry.content,
+          mode: entry.mode ?? null,
+          costUsd: entry.cost_usd ?? null,
+        },
+      })
+      .catch(() => {});
   }
 
   async saveSession(): Promise<void> {
-    const filePath = path.join(this.dataDir, "session-log.json");
-    await fs.writeFile(filePath, JSON.stringify(this.sessionLog, null, 2));
+    // Entries are persisted individually via addSessionEntry — nothing to flush.
   }
 
-  getSessionLog(): SessionLog {
-    return this.sessionLog;
+  getSessionLog() {
+    return {
+      sessionId: this.sessionId,
+      started: new Date().toISOString(),
+      entries: [] as SessionEntry[],
+    };
   }
-}
-
-function sanitizeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9.-]/g, "_").toLowerCase();
 }

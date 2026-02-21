@@ -1,25 +1,26 @@
-import fs from "fs";
-import path from "path";
 import chalk from "chalk";
+import prisma from "../db.js";
 import { TestReport, StepResult } from "./test-types.js";
 import * as display from "../cli/display.js";
 
-const REPORTS_DIR = path.resolve("data", "test-reports");
-
 /**
- * Persists a JSON test report to data/test-reports/ and prints a
- * human-readable summary to the console.
+ * Persists a test report to the database and prints a
+ * human-readable summary to the console. Returns the generated report ID.
  */
-export function saveReport(report: TestReport): string {
-  fs.mkdirSync(REPORTS_DIR, { recursive: true });
-
-  const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const safeName = report.title.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
-  const fileName = `${ts}_${safeName}.json`;
-  const filePath = path.join(REPORTS_DIR, fileName);
-
-  fs.writeFileSync(filePath, JSON.stringify(report, null, 2), "utf-8");
-  return filePath;
+export async function saveReport(report: TestReport): Promise<string> {
+  const row = await prisma.testReport.create({
+    data: {
+      title: report.title,
+      timestamp: new Date(report.timestamp),
+      domain: report.domain,
+      steps: report.steps as unknown as object,
+      verdict: report.verdict,
+      summary: report.summary,
+      durationMs: report.durationMs,
+      costUsd: report.costUsd,
+    },
+  });
+  return row.id;
 }
 
 export function printReportSummary(report: TestReport): void {

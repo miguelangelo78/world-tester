@@ -1,6 +1,7 @@
 import readline from "readline/promises";
 import { stdin as input, stdout as output } from "process";
 import { loadConfig } from "./config/index.js";
+import { setupDatabase } from "./db.js";
 import { initBrowser, closeBrowser, getCurrentUrl, getDomain } from "./browser/stagehand.js";
 import { CostTracker } from "./cost/tracker.js";
 import { MemoryManager } from "./memory/manager.js";
@@ -15,6 +16,11 @@ async function main() {
   const config = loadConfig();
   display.info(`Provider: ${config.provider} | Model: ${config.cuaModel}`);
   display.info(`Headless: ${config.headless}`);
+
+  // Auto-setup: connect to database and sync schema
+  display.info("Connecting to database...");
+  await setupDatabase();
+  display.success("Database ready");
 
   // Initialize memory
   const memory = new MemoryManager(config.dataDir);
