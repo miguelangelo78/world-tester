@@ -27,13 +27,28 @@ function getActivePage(stagehand: Stagehand): StagehandPage {
   return stagehand.context.pages()[0];
 }
 
+/**
+ * Stagehand's extract() often returns `{ extraction: "..." }` — unwrap
+ * single-string wrapper objects so the user sees clean text.
+ */
+function unwrapExtraction(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const values = Object.values(result as Record<string, unknown>);
+    if (values.length === 1 && typeof values[0] === "string") {
+      return values[0];
+    }
+  }
+  return JSON.stringify(result, null, 2);
+}
+
 export async function runExtract(
   stagehand: Stagehand,
   instruction: string,
 ): Promise<ModeResult> {
   const result = await stagehand.extract(instruction);
   return {
-    message: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+    message: unwrapExtraction(result),
     success: true,
   };
 }
@@ -383,7 +398,7 @@ export async function runAsk(
 
   const result = await stagehand.extract(prompt);
   return {
-    message: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+    message: unwrapExtraction(result),
     success: true,
   };
 }
