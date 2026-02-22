@@ -105,6 +105,23 @@ export async function extractPostCommandLearnings(
     }
   }
 
+  // Store the actual finding/result from successful commands as a general learning
+  if (result.success && result.message && result.message.length > 10 && instruction.length > 5) {
+    const finding = result.message.slice(0, 200).trim();
+    // Only store if the result contains substantive information (not just "OK" or generic confirmations)
+    const isSubstantive = finding.length > 20 &&
+      !/^(ok|done|success|completed|navigated)/i.test(finding);
+    if (isSubstantive) {
+      await memory.addLearning({
+        domain,
+        category: "general",
+        pattern: `Q: "${instruction.slice(0, 80)}" → ${finding}`,
+        confidence: 0.9,
+        source_task_id: taskId,
+      });
+    }
+  }
+
   // Store gotcha learnings from failed commands
   if (!result.success && instruction.length > 10 && mode === "task") {
     const reason = result.message?.slice(0, 100) ?? "unknown reason";
