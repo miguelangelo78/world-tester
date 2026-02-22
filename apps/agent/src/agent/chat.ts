@@ -7,7 +7,7 @@ import type { OutputSink } from "../output-sink.js";
 import type { ConversationMessageDTO } from "@world-tester/shared";
 
 export type ChatAction =
-  | "chat" | "task" | "act" | "goto" | "learn" | "extract"
+  | "chat" | "task" | "act" | "goto" | "learn" | "extract" | "observe"
   | "spawn_browser" | "switch_browser";
 
 export interface ChatResponse {
@@ -39,7 +39,7 @@ Actions:
   {"action": "act", "instruction": "..."} — single browser action (click, toggle, scroll)
   {"action": "goto", "instruction": "https://..."} — navigate to a URL
   {"action": "learn", "instruction": "..."} — explore/learn a page
-  {"action": "extract", "instruction": "..."} — read data from the page
+  {"action": "extract", "instruction": "..."} — read data from the page or observe visual details
   {"action": "spawn_browser", "instruction": "<name>", "options": {"isolated": true}} — open a new browser instance
   {"action": "switch_browser", "instruction": "<name>"} — switch to an existing browser instance
 
@@ -291,7 +291,7 @@ function parseActionJson(
   raw: string,
 ): { action: ChatAction; message?: string; instruction?: string; options?: Record<string, unknown> } | null {
   const validActions: ChatAction[] = [
-    "chat", "task", "act", "goto", "learn", "extract",
+    "chat", "task", "act", "goto", "learn", "extract", "observe",
     "spawn_browser", "switch_browser",
   ];
 

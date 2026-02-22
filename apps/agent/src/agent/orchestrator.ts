@@ -377,6 +377,7 @@ export class Orchestrator {
         );
         break;
       case "extract":
+      case "observe":
         browserResult = await runExtract(stagehand, handoffInstruction);
         break;
       default:
