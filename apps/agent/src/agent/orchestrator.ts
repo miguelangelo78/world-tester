@@ -5,6 +5,7 @@ import { MemoryManager } from "../memory/manager.js";
 import { ParsedCommand } from "../cli/parser.js";
 import { BrowserPool } from "../browser/pool.js";
 import type { OutputSink } from "../output-sink.js";
+import { raceAbort, throwIfAborted, isAbortError } from "../abort.js";
 import {
   runExtract,
   runAct,
@@ -65,7 +66,7 @@ export class Orchestrator {
     return this.resolveTarget(command).getUrl();
   }
 
-  async execute(command: ParsedCommand, sink: OutputSink): Promise<void> {
+  async execute(command: ParsedCommand, sink: OutputSink, signal?: AbortSignal): Promise<void> {
     const startTime = Date.now();
     const target = this.resolveTarget(command);
     const stagehand = target.stagehand;
@@ -73,6 +74,7 @@ export class Orchestrator {
 
     await target.focusActiveTab();
     target.setSink(sink);
+    throwIfAborted(signal);
 
     if (command.targetBrowser) {
       const tabLabel = command.targetTab !== undefined ? `:${command.targetTab}` : "";
@@ -83,64 +85,65 @@ export class Orchestrator {
 
     const siteKnowledge = await this.memory.getSiteKnowledge(domain);
     const learnings = await this.memory.getLearnings(domain);
+    throwIfAborted(signal);
 
     let result: ModeResult;
 
     try {
       switch (command.mode) {
         case "extract":
-          result = await runExtract(stagehand, command.instruction);
+          result = await raceAbort(runExtract(stagehand, command.instruction), signal);
           break;
         case "act":
-          result = await runAct(stagehand, command.instruction);
+          result = await raceAbort(runAct(stagehand, command.instruction), signal);
           break;
         case "observe":
-          result = await runObserve(stagehand, command.instruction);
+          result = await raceAbort(runObserve(stagehand, command.instruction), signal);
           break;
         case "task":
-          result = await runTask(
+          result = await raceAbort(runTask(
             stagehand,
             command.instruction,
             this.config,
             siteKnowledge,
             learnings,
             sink,
-          );
+          ), signal);
           break;
         case "goto":
-          result = await runGoto(stagehand, command.instruction);
+          result = await raceAbort(runGoto(stagehand, command.instruction), signal);
           break;
         case "search":
-          result = await runSearch(
+          result = await raceAbort(runSearch(
             stagehand,
             command.instruction,
             this.config,
             siteKnowledge,
             learnings,
-          );
+          ), signal);
           break;
         case "ask":
-          result = await runAsk(
+          result = await raceAbort(runAsk(
             stagehand,
             command.instruction,
             siteKnowledge,
             learnings,
-          );
+          ), signal);
           break;
         case "chat": {
           result = await this.runSmartMode(
-            command.instruction, siteKnowledge, learnings, stagehand, sink,
+            command.instruction, siteKnowledge, learnings, stagehand, sink, signal,
           );
           break;
         }
         case "learn":
-          result = await runLearn(
+          result = await raceAbort(runLearn(
             stagehand,
             this.config,
             this.memory,
             command.instruction,
             sink,
-          );
+          ), signal);
           break;
         case "test":
           result = await runTest(
@@ -153,15 +156,17 @@ export class Orchestrator {
             learnings,
             this.pool,
             sink,
+            signal,
           );
           break;
         case "auto":
-          result = await this.runAuto(command.instruction, siteKnowledge, learnings, stagehand, sink);
+          result = await this.runAuto(command.instruction, siteKnowledge, learnings, stagehand, sink, signal);
           break;
         default:
           result = { message: `Unknown mode: ${command.mode}`, success: false };
       }
     } catch (err) {
+      if (isAbortError(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       sink.error(`Command failed: ${msg}`);
       this.memory.addSessionEntry({
@@ -251,13 +256,14 @@ export class Orchestrator {
     learnings: Awaited<ReturnType<MemoryManager["getLearnings"]>>,
     stagehand: Stagehand,
     sink: OutputSink,
+    signal?: AbortSignal,
   ): Promise<ModeResult> {
     const urlMatch = instruction.match(/^https?:\/\/\S+$/);
     if (urlMatch) {
-      return runGoto(stagehand, urlMatch[0]);
+      return raceAbort(runGoto(stagehand, urlMatch[0]), signal);
     }
 
-    return this.runSmartMode(instruction, siteKnowledge, learnings, stagehand, sink);
+    return this.runSmartMode(instruction, siteKnowledge, learnings, stagehand, sink, signal);
   }
 
   /**
@@ -271,10 +277,11 @@ export class Orchestrator {
     learnings: Awaited<ReturnType<MemoryManager["getLearnings"]>>,
     stagehand: Stagehand,
     sink: OutputSink,
+    signal?: AbortSignal,
   ): Promise<ModeResult> {
     const currentUrl = this.resolveUrlFromStagehand(stagehand);
 
-    const chatResult = await runSmartChat(
+    const chatResult = await raceAbort(runSmartChat(
       instruction,
       this.config,
       siteKnowledge,
@@ -282,7 +289,7 @@ export class Orchestrator {
       currentUrl,
       this.pool,
       sink,
-    );
+    ), signal);
 
     const classifyCost = {
       input_tokens: chatResult.inputTokens,
@@ -347,41 +354,42 @@ export class Orchestrator {
     // Hand off to browser mode
     const handoffInstruction = chatResult.instruction ?? instruction;
     sink.modeSwitch("chat", chatResult.action, handoffInstruction);
+    throwIfAborted(signal);
 
     let browserResult: ModeResult;
 
     switch (chatResult.action) {
       case "task":
-        browserResult = await runTask(
+        browserResult = await raceAbort(runTask(
           stagehand,
           handoffInstruction,
           this.config,
           siteKnowledge,
           learnings,
           sink,
-        );
+        ), signal);
         break;
       case "act":
-        browserResult = await runAct(stagehand, handoffInstruction);
+        browserResult = await raceAbort(runAct(stagehand, handoffInstruction), signal);
         break;
       case "goto":
-        browserResult = await runGoto(stagehand, handoffInstruction);
+        browserResult = await raceAbort(runGoto(stagehand, handoffInstruction), signal);
         break;
       case "learn":
-        browserResult = await runLearn(
+        browserResult = await raceAbort(runLearn(
           stagehand,
           this.config,
           this.memory,
           handoffInstruction,
           sink,
-        );
+        ), signal);
         break;
       case "extract":
       case "observe":
-        browserResult = await runExtract(stagehand, handoffInstruction);
+        browserResult = await raceAbort(runExtract(stagehand, handoffInstruction), signal);
         break;
       default:
-        browserResult = await runAct(stagehand, handoffInstruction);
+        browserResult = await raceAbort(runAct(stagehand, handoffInstruction), signal);
     }
 
     const status = browserResult.success ? "completed" : "failed";
@@ -407,7 +415,9 @@ export class Orchestrator {
     const learningsNow = await this.memory.getLearnings(domainNow);
     const urlNow = this.resolveUrlFromStagehand(stagehand);
 
-    const followUp = await runChat(
+    throwIfAborted(signal);
+
+    const followUp = await raceAbort(runChat(
       `[System: you just executed a ${chatResult.action} action for the user. ` +
       `The instruction was: "${handoffInstruction}". ` +
       `Result (${status}): ${resultSummary}. ` +
@@ -417,7 +427,7 @@ export class Orchestrator {
       learningsNow,
       urlNow,
       sink,
-    );
+    ), signal);
 
     return {
       message: followUp.message ?? resultSummary,

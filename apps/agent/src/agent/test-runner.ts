@@ -11,6 +11,7 @@ import { verifyStep } from "./verify.js";
 import { captureScreenshot } from "../browser/stagehand.js";
 import type { BrowserPool } from "../browser/pool.js";
 import { extractTestStepLearning, extractTestRunLearnings } from "./learning.js";
+import { raceAbort } from "../abort.js";
 import {
   saveReport,
   printReportSummary,
@@ -59,6 +60,7 @@ export async function runTest(
   learnings: Learning[],
   pool?: BrowserPool,
   sink?: OutputSink,
+  signal?: AbortSignal,
 ): Promise<TestRunResult> {
   const startTime = Date.now();
   let totalUsage: UsageData = { input_tokens: 0, output_tokens: 0 };
@@ -97,15 +99,31 @@ export async function runTest(
   const results: StepResult[] = [];
   let aborted = false;
 
+  let userAborted = false;
+
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
 
-    if (aborted) {
+    if (aborted || userAborted) {
+      const reason = userAborted ? "Aborted by user" : "Skipped — earlier critical step failed";
       sink?.testStep(i, plan.steps.length, step.action, "skip");
       results.push({
         step,
         verdict: "skip",
-        actual: "Skipped — earlier critical step failed",
+        actual: reason,
+        evidence: "",
+        durationMs: 0,
+      });
+      continue;
+    }
+
+    if (signal?.aborted) {
+      userAborted = true;
+      sink?.testStep(i, plan.steps.length, step.action, "skip");
+      results.push({
+        step,
+        verdict: "skip",
+        actual: "Aborted by user",
         evidence: "",
         durationMs: 0,
       });
@@ -140,15 +158,26 @@ export async function runTest(
     }
 
     // Execute
-    const execResult = await executeStep(
-      stepStagehand,
-      step,
-      i,
-      plan,
-      config,
-      siteKnowledge,
-      learnings,
-    );
+    let execResult: Awaited<ReturnType<typeof executeStep>>;
+    try {
+      execResult = await raceAbort(executeStep(
+        stepStagehand,
+        step,
+        i,
+        plan,
+        config,
+        siteKnowledge,
+        learnings,
+      ), signal);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        userAborted = true;
+        sink?.testStep(i, plan.steps.length, step.action, "skip");
+        results.push({ step, verdict: "skip", actual: "Aborted by user", evidence: "", durationMs: Date.now() - stepStart });
+        continue;
+      }
+      throw err;
+    }
     totalUsage = mergeUsage(totalUsage, execResult.usage);
 
     // Brief wait for SPA content to settle after actions (filters, navigation, etc.)
@@ -165,14 +194,32 @@ export async function runTest(
       // Non-fatal
     }
 
+    if (signal?.aborted) {
+      userAborted = true;
+      sink?.testStep(i, plan.steps.length, step.action, "skip");
+      results.push({ step, verdict: "skip", actual: "Aborted by user", evidence: "", durationMs: Date.now() - stepStart });
+      continue;
+    }
+
     // Verify — pass the CUA's own description as primary evidence
-    const verification = await verifyStep(
-      stepStagehand,
-      config,
-      step.action,
-      step.expected,
-      execResult.message,
-    );
+    let verification: Awaited<ReturnType<typeof verifyStep>>;
+    try {
+      verification = await raceAbort(verifyStep(
+        stepStagehand,
+        config,
+        step.action,
+        step.expected,
+        execResult.message,
+      ), signal);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        userAborted = true;
+        sink?.testStep(i, plan.steps.length, step.action, "skip");
+        results.push({ step, verdict: "skip", actual: "Aborted by user", evidence: "", durationMs: Date.now() - stepStart });
+        continue;
+      }
+      throw err;
+    }
 
     const verdict = verification.passed ? "pass" : "fail";
     const stepDuration = Date.now() - stepStart;
@@ -219,7 +266,9 @@ export async function runTest(
   );
 
   let verdict: TestVerdict;
-  if (setupFailed) {
+  if (userAborted) {
+    verdict = "aborted";
+  } else if (setupFailed) {
     verdict = "fail";
   } else if (assertionResults.length === 0) {
     verdict = failed === 0 ? "pass" : "fail";

@@ -7,6 +7,7 @@ import {
   XCircle,
   AlertTriangle,
   MinusCircle,
+  Ban,
   ChevronDown,
   ChevronRight,
   ImageIcon,
@@ -20,6 +21,7 @@ const verdictConfig = {
   pass: { icon: CheckCircle2, color: "text-success", bg: "bg-success/10", label: "PASS" },
   fail: { icon: XCircle, color: "text-destructive", bg: "bg-destructive/10", label: "FAIL" },
   partial: { icon: AlertTriangle, color: "text-warning", bg: "bg-warning/10", label: "PARTIAL" },
+  aborted: { icon: Ban, color: "text-muted-foreground", bg: "bg-muted/10", label: "ABORTED" },
 };
 
 const stepVerdictConfig = {

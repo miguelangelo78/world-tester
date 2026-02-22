@@ -1,4 +1,4 @@
-import readline from "readline/promises";
+import readline from "readline";
 import { stdin as input, stdout as output } from "process";
 import { getCurrentUrl, getDomain } from "./browser/stagehand.js";
 import { parseCommand, parseBrowserCommand, parseConversationCommand, getHelpText } from "./cli/parser.js";
@@ -6,6 +6,13 @@ import * as display from "./cli/display.js";
 import { createCliSink } from "./cli-sink.js";
 import { createAgentCore } from "./core.js";
 import { loadConversationContext } from "./agent/chat.js";
+import { isAbortError } from "./abort.js";
+
+function question(rl: readline.Interface, promptText: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(promptText, resolve);
+  });
+}
 
 async function main() {
   display.banner();
@@ -19,6 +26,25 @@ async function main() {
   display.separator();
 
   const rl = readline.createInterface({ input, output });
+
+  let activeAbort: AbortController | null = null;
+
+  rl.on("SIGINT", () => {
+    if (activeAbort) {
+      activeAbort.abort();
+      activeAbort = null;
+      console.log("\n[aborted]");
+      return;
+    }
+    // No command running — behave like normal Ctrl+C (exit)
+    console.log();
+    display.info("Shutting down...");
+    shutdown().then(() => {
+      rl.close();
+      display.success("Goodbye!");
+      process.exit(0);
+    });
+  });
 
   const prompt = () => {
     const url = getCurrentUrl();
@@ -36,7 +62,7 @@ async function main() {
   while (running) {
     let line: string;
     try {
-      line = await rl.question(prompt());
+      line = await question(rl, prompt());
     } catch {
       break;
     }
@@ -273,7 +299,19 @@ async function main() {
 
       default: {
         const command = parseCommand(trimmed);
-        await orchestrator.execute(command, sink);
+        const ac = new AbortController();
+        activeAbort = ac;
+        try {
+          await orchestrator.execute(command, sink, ac.signal);
+        } catch (err) {
+          if (isAbortError(err)) {
+            display.warn("Command aborted.");
+          } else {
+            throw err;
+          }
+        } finally {
+          activeAbort = null;
+        }
         break;
       }
     }

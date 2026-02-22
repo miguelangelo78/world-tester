@@ -24,7 +24,7 @@ export interface StepResult {
   durationMs: number;
 }
 
-export type TestVerdict = "pass" | "fail" | "partial";
+export type TestVerdict = "pass" | "fail" | "partial" | "aborted";
 
 export interface TestReport {
   title: string;

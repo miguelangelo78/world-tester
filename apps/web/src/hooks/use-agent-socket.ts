@@ -26,6 +26,7 @@ export interface AgentSocket {
   activeConversationId: string | null;
   activeConversation: ConversationInfo | null;
   sendCommand: (raw: string) => string;
+  abortCommand: (id: string) => void;
   onMessage: (handler: MessageHandler) => () => void;
   switchConversation: (id: string) => void;
   createConversation: (title?: string) => void;
@@ -122,6 +123,11 @@ export function useAgentSocket(): AgentSocket {
     return id;
   }, []);
 
+  const abortCommand = useCallback((id: string) => {
+    const msg: WSMessage = { type: "abort", id, payload: {} };
+    wsRef.current?.send(JSON.stringify(msg));
+  }, []);
+
   const onMessage = useCallback((handler: MessageHandler) => {
     handlersRef.current.add(handler);
     return () => {
@@ -157,7 +163,7 @@ export function useAgentSocket(): AgentSocket {
   return {
     status, browserState, cost,
     conversations, activeConversationId, activeConversation,
-    sendCommand, onMessage,
+    sendCommand, abortCommand, onMessage,
     switchConversation, createConversation, renameConversation, archiveConversation,
     refreshConversations, requestConversationReplay,
   };

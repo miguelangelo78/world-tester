@@ -2,6 +2,7 @@
 
 export type WSMessageType =
   | "command"
+  | "abort"
   | "command_result"
   | "stream_chunk"
   | "stream_end"
@@ -94,7 +95,7 @@ export interface ErrorPayload {
 // Keep in sync with apps/agent/src/memory/types.ts and test-types.ts.
 
 export type StepVerdict = "pass" | "fail" | "skip";
-export type TestVerdict = "pass" | "fail" | "partial";
+export type TestVerdict = "pass" | "fail" | "partial" | "aborted";
 
 export interface TestStepResult {
   action: string;

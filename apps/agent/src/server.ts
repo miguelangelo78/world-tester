@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { WebSocketServer, WebSocket } from "ws";
 import { createAgentCore, AgentCore } from "./core.js";
+import { isAbortError } from "./abort.js";
 import { parseCommand, parseBrowserCommand, getHelpText } from "./cli/parser.js";
 import { getCurrentUrl, getDomain } from "./browser/stagehand.js";
 import type { OutputSink } from "./output-sink.js";
@@ -126,6 +127,7 @@ async function handleCommand(
   core: AgentCore,
   clients: Set<WebSocket>,
   commandId?: string,
+  signal?: AbortSignal,
 ) {
   const broadcast = (msg: WSMessage) => {
     const data = JSON.stringify(msg);
@@ -499,10 +501,14 @@ async function handleCommand(
   }).catch(() => {});
 
   try {
-    await core.orchestrator.execute(command, commandSink);
+    await core.orchestrator.execute(command, commandSink, signal);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    commandSink.error(`Command failed: ${msg}`);
+    if (isAbortError(err)) {
+      commandSink.warn("Command aborted by user.");
+    } else {
+      const msg = err instanceof Error ? err.message : String(err);
+      commandSink.error(`Command failed: ${msg}`);
+    }
   }
   commandSink.flushStream();
   broadcast({ type: "stream_end", id: commandId, payload: {} });
@@ -542,6 +548,7 @@ async function handleCommand(
 
 async function main() {
   const clients = new Set<WebSocket>();
+  const activeCommands = new Map<string, AbortController>();
   const sink = createWsSink(clients);
 
   console.log("[agent-server] Starting agent core...");
@@ -643,10 +650,21 @@ async function main() {
         return;
       }
 
+      if (msg.type === "abort") {
+        const controller = msg.id ? activeCommands.get(msg.id) : undefined;
+        if (controller) {
+          controller.abort();
+          console.log(`[agent-server] Abort requested for command ${msg.id}`);
+        }
+        return;
+      }
+
       if (msg.type === "command") {
         const { raw } = msg.payload as { raw: string };
+        const ac = new AbortController();
+        if (msg.id) activeCommands.set(msg.id, ac);
         try {
-          await handleCommand(raw, core, clients, msg.id);
+          await handleCommand(raw, core, clients, msg.id, ac.signal);
         } catch (err) {
           const errMessage = err instanceof Error ? err.message : String(err);
           const broadcastAll = (m: WSMessage) => {
@@ -663,6 +681,8 @@ async function main() {
             id: msg.id,
             payload: { message: errMessage, success: false, mode: "error", durationMs: 0 } satisfies CommandResultPayload,
           });
+        } finally {
+          if (msg.id) activeCommands.delete(msg.id);
         }
       }
     });

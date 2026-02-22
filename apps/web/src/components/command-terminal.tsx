@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, Square } from "lucide-react";
 import { useAgent } from "./agent-provider";
 import { MarkdownRenderer } from "./markdown-renderer";
 import type {
@@ -17,7 +17,7 @@ interface LogEntry {
 }
 
 export function CommandTerminal() {
-  const { status, sendCommand, onMessage, requestConversationReplay } = useAgent();
+  const { status, sendCommand, abortCommand, onMessage, requestConversationReplay } = useAgent();
   const [input, setInput] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -200,6 +200,13 @@ export function CommandTerminal() {
     activeCommandId.current = id;
   }, [input, busy, status, addLog, sendCommand]);
 
+  const handleAbort = useCallback(() => {
+    if (activeCommandId.current) {
+      abortCommand(activeCommandId.current);
+      addLog("warn", "Aborting...");
+    }
+  }, [abortCommand, addLog]);
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -371,10 +378,15 @@ export function CommandTerminal() {
           );
         })}
         {busy && (
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span>Thinking...</span>
-          </div>
+          <button
+            onClick={handleAbort}
+            className="flex items-center gap-1.5 text-muted-foreground hover:text-destructive transition-colors cursor-pointer group"
+          >
+            <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
+            <Square className="h-3 w-3 hidden group-hover:block" />
+            <span className="group-hover:hidden">Thinking...</span>
+            <span className="hidden group-hover:inline">Stop</span>
+          </button>
         )}
       </div>
       <div className="flex items-center gap-2 border-t border-border px-3 py-2 sm:py-2 py-3">
