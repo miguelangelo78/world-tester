@@ -4,7 +4,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { Learning, SiteKnowledge } from "../memory/types.js";
 import { UsageData } from "../cost/tracker.js";
 import type { OutputSink } from "../output-sink.js";
-import { raceAbort, isAbortError } from "../abort.js";
+import { raceAbort } from "../abort.js";
 
 export interface ModeResult {
   message: string;
@@ -76,10 +76,6 @@ export async function runTask(
 ): Promise<ModeResult> {
   const systemPrompt = buildSystemPrompt(siteKnowledge, learnings);
 
-  // Capture pre-task URL so we can navigate back if aborted
-  const page = getActivePage(stagehand);
-  const preTaskUrl = page.url();
-
   const agent = stagehand.agent({
     mode: "cua",
     model: {
@@ -89,25 +85,11 @@ export async function runTask(
     systemPrompt,
   });
 
-  let result: Awaited<ReturnType<typeof agent.execute>>;
-  try {
-    result = await raceAbort(agent.execute({
-      instruction,
-      maxSteps: 30,
-      highlightCursor: true,
-    }), signal);
-  } catch (err) {
-    if (isAbortError(err)) {
-      // Navigate back to pre-task URL to stop the CUA from making further
-      // meaningful changes — any in-flight step completes against about:blank
-      // or the original page instead of a new destination.
-      try {
-        await page.goto(preTaskUrl, { waitUntil: "commit", timeout: 3000 });
-      } catch { /* best-effort */ }
-      throw err;
-    }
-    throw err;
-  }
+  const result = await raceAbort(agent.execute({
+    instruction,
+    maxSteps: 30,
+    highlightCursor: true,
+  }), signal);
 
   const msg = result.message ?? "Task completed.";
   const ok = result.success === true;
