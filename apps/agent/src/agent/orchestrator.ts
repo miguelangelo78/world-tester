@@ -387,6 +387,20 @@ export class Orchestrator {
     const resultSummary = browserResult.message.slice(0, 500);
     addToHistory("model", `[${chatResult.action} ${status}] ${resultSummary}`);
 
+    // Persist learnings from the browser handoff (the main execute() skips this for chat mode)
+    const handoffDomain = this.resolveDomainFromStagehand(stagehand);
+    if (!["goto", "learn"].includes(chatResult.action)) {
+      extractPostCommandLearnings(
+        stagehand,
+        this.memory,
+        handoffDomain,
+        handoffInstruction,
+        chatResult.action,
+        browserResult,
+        `chat-handoff-${Date.now().toString(36)}`,
+      ).catch(() => {});
+    }
+
     const domainNow = this.resolveDomainFromStagehand(stagehand);
     const siteKnowledgeNow = await this.memory.getSiteKnowledge(domainNow);
     const learningsNow = await this.memory.getLearnings(domainNow);
