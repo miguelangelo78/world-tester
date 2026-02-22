@@ -14,7 +14,7 @@
     "web": "npm run dev -w @world-tester/web",
     "web:build": "npm run build -w @world-tester/web",
     "dev": "bash scripts/dev.sh",
-    "release": "AGENT_MODE=server VNC=true docker compose down && AGENT_MODE=server VNC=true docker compose up --build -d && npm run logs",
+    "release": "git pull && AGENT_MODE=server VNC=true docker compose down && AGENT_MODE=server VNC=true docker compose up --build -d && npm run logs",
     "release:interactive": "docker compose run --rm --build agent",
     "release:interactive:vnc": "(while ! nc -z localhost 5900 2>/dev/null; do sleep 1; done && npm run vnc) & VNC=true docker compose run --rm --build --service-ports agent",
     "release:agent-only": "docker compose up --build -d agent",

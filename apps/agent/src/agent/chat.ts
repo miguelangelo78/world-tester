@@ -54,6 +54,7 @@ Examples:
   "switch to the admin browser" → {"action": "switch_browser", "instruction": "admin"}
 
 Rules:
+- If the user explicitly mentions a mode (e.g. "as a task", "do it as a task", "extract this", "learn this"), ALWAYS use that mode. The user's explicit mode choice overrides all other rules.
 - Any message that asks to DO, CHANGE, CLICK, SWITCH, TRY, OPEN, UPDATE, SET, TOGGLE, or NAVIGATE is a browser action. NEVER classify these as chat.
 - "open a new browser", "spawn browser", "launch another browser" → spawn_browser
 - "switch to browser X", "use browser X" → switch_browser (only if a browser with that name exists)
