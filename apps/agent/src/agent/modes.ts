@@ -4,6 +4,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { Learning, SiteKnowledge } from "../memory/types.js";
 import { UsageData } from "../cost/tracker.js";
 import type { OutputSink } from "../output-sink.js";
+import { raceAbort, isAbortError } from "../abort.js";
 
 export interface ModeResult {
   message: string;
@@ -71,8 +72,13 @@ export async function runTask(
   siteKnowledge: SiteKnowledge | null,
   learnings: Learning[],
   sink?: OutputSink,
+  signal?: AbortSignal,
 ): Promise<ModeResult> {
   const systemPrompt = buildSystemPrompt(siteKnowledge, learnings);
+
+  // Capture pre-task URL so we can navigate back if aborted
+  const page = getActivePage(stagehand);
+  const preTaskUrl = page.url();
 
   const agent = stagehand.agent({
     mode: "cua",
@@ -83,11 +89,25 @@ export async function runTask(
     systemPrompt,
   });
 
-  const result = await agent.execute({
-    instruction,
-    maxSteps: 30,
-    highlightCursor: true,
-  });
+  let result: Awaited<ReturnType<typeof agent.execute>>;
+  try {
+    result = await raceAbort(agent.execute({
+      instruction,
+      maxSteps: 30,
+      highlightCursor: true,
+    }), signal);
+  } catch (err) {
+    if (isAbortError(err)) {
+      // Navigate back to pre-task URL to stop the CUA from making further
+      // meaningful changes — any in-flight step completes against about:blank
+      // or the original page instead of a new destination.
+      try {
+        await page.goto(preTaskUrl, { waitUntil: "commit", timeout: 3000 });
+      } catch { /* best-effort */ }
+      throw err;
+    }
+    throw err;
+  }
 
   const msg = result.message ?? "Task completed.";
   const ok = result.success === true;
@@ -96,11 +116,14 @@ export async function runTask(
 
   // Detect stuck clicks — CUA reports clicking but nothing changed
   if (looksLikeStuckClick(msg)) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const retryResult = await retryWithAct(stagehand, instruction, msg);
     if (retryResult?.success) {
       sink?.info(`[auto-retry] Clicked "${retryResult.retryTarget}" via fallback. Resuming task...`);
       allActions.push(...(retryResult.actions ?? []));
       totalUsage = mergeUsage(totalUsage, retryResult.usage);
+
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
       // Resume: run a new CUA pass now that the stuck element was clicked
       const resumeAgent = stagehand.agent({
@@ -117,11 +140,11 @@ export async function runTask(
         `The page should now show the content for that element. ` +
         `Continue with the original task: ${instruction}`;
 
-      const resumeResult = await resumeAgent.execute({
+      const resumeResult = await raceAbort(resumeAgent.execute({
         instruction: resumeInstruction,
         maxSteps: 20,
         highlightCursor: true,
-      });
+      }), signal);
 
       const resumeMsg = resumeResult.message ?? "Task resumed and completed.";
       allActions.push(...(resumeResult.actions ?? []));

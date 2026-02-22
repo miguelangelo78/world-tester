@@ -378,15 +378,10 @@ export function CommandTerminal() {
           );
         })}
         {busy && (
-          <button
-            onClick={handleAbort}
-            className="flex items-center gap-1.5 text-muted-foreground hover:text-destructive transition-colors cursor-pointer group"
-          >
-            <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
-            <Square className="h-3 w-3 hidden group-hover:block" />
-            <span className="group-hover:hidden">Thinking...</span>
-            <span className="hidden group-hover:inline">Stop</span>
-          </button>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>Thinking...</span>
+          </div>
         )}
       </div>
       <div className="flex items-center gap-2 border-t border-border px-3 py-2 sm:py-2 py-3">
@@ -405,13 +400,23 @@ export function CommandTerminal() {
           className="flex-1 min-w-0 bg-transparent text-foreground placeholder:text-muted-foreground outline-none"
           disabled={busy}
         />
-        <button
-          onClick={handleSubmit}
-          disabled={busy || !input.trim()}
-          className="rounded p-1.5 sm:p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
-        >
-          <Send className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-        </button>
+        {busy ? (
+          <button
+            onClick={handleAbort}
+            className="rounded p-1.5 sm:p-1 text-destructive hover:text-destructive/80"
+            title="Stop command"
+          >
+            <Square className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+          </button>
+        ) : (
+          <button
+            onClick={handleSubmit}
+            disabled={!input.trim()}
+            className="rounded p-1.5 sm:p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
+            <Send className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

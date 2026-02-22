@@ -101,14 +101,15 @@ export class Orchestrator {
           result = await raceAbort(runObserve(stagehand, command.instruction), signal);
           break;
         case "task":
-          result = await raceAbort(runTask(
+          result = await runTask(
             stagehand,
             command.instruction,
             this.config,
             siteKnowledge,
             learnings,
             sink,
-          ), signal);
+            signal,
+          );
           break;
         case "goto":
           result = await raceAbort(runGoto(stagehand, command.instruction), signal);
@@ -360,14 +361,15 @@ export class Orchestrator {
 
     switch (chatResult.action) {
       case "task":
-        browserResult = await raceAbort(runTask(
+        browserResult = await runTask(
           stagehand,
           handoffInstruction,
           this.config,
           siteKnowledge,
           learnings,
           sink,
-        ), signal);
+          signal,
+        );
         break;
       case "act":
         browserResult = await raceAbort(runAct(stagehand, handoffInstruction), signal);
