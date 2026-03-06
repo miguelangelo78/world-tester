@@ -37,9 +37,9 @@ RUN cd apps/agent && npx playwright install chromium
 # Install system dependencies for Playwright
 RUN cd apps/agent && npx playwright install-deps chromium
 
-# Now run the postinstall scripts (prisma generate, etc.)
-# Set DATABASE_URL for prisma generation
-RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npm run db:generate -w @world-tester/agent 2>/dev/null || true
+# Generate Prisma client (required for runtime)
+# Set DATABASE_URL for prisma generation (dummy URL is fine for schema introspection)
+RUN cd apps/agent && DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
 
 # Copy agent source
 COPY apps/agent/ apps/agent/
