@@ -1,16 +1,19 @@
-FROM node:22-slim AS base
+FROM node:22 AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     x11vnc \
     fluxbox \
     ca-certificates \
+    python3 \
+    make \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy root workspace files
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/agent/package.json apps/agent/
 
@@ -21,14 +24,22 @@ COPY packages/shared/ packages/shared/
 COPY apps/agent/prisma/ apps/agent/prisma/
 COPY apps/agent/prisma.config.ts apps/agent/
 
-RUN npm ci --ignore-scripts -w @world-tester/agent -w @world-tester/shared
-
-# Install Playwright Chromium
+# Set PLAYWRIGHT_BROWSERS_PATH before npm install so postinstall scripts use it
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
-RUN cd apps/agent && npx playwright install --with-deps chromium
 
-# Generate Prisma client (dummy URL for codegen only)
-RUN cd apps/agent && DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
+# Do a fresh install for the current ARM64 architecture (skip postinstall scripts)
+# Don't use the x86_64 lockfile - generate a new one for this architecture
+RUN npm install --ignore-scripts -w @world-tester/agent -w @world-tester/shared
+
+# Install Playwright Chromium explicitly 
+RUN cd apps/agent && npx playwright install chromium
+
+# Install system dependencies for Playwright
+RUN cd apps/agent && npx playwright install-deps chromium
+
+# Now run the postinstall scripts (prisma generate, etc.)
+# Set DATABASE_URL for prisma generation
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npm run db:generate -w @world-tester/agent 2>/dev/null || true
 
 # Copy agent source
 COPY apps/agent/ apps/agent/

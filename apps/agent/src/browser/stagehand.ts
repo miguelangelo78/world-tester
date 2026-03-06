@@ -38,8 +38,12 @@ export function findPlaywrightChromium(): string {
     .sort()
     .reverse();
   for (const dir of dirs) {
-    const candidate = path.join(cacheDir, dir, "chrome-linux64", "chrome");
-    if (fs.existsSync(candidate)) return candidate;
+    // Check for x86_64 variant first
+    const candidate64 = path.join(cacheDir, dir, "chrome-linux64", "chrome");
+    if (fs.existsSync(candidate64)) return candidate64;
+    // Check for ARM64 variant (without 64 suffix)
+    const candidateArm = path.join(cacheDir, dir, "chrome-linux", "chrome");
+    if (fs.existsSync(candidateArm)) return candidateArm;
   }
   throw new Error(
     "Playwright Chromium not found. Run: npx playwright install chromium",
