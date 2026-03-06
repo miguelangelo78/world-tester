@@ -81,6 +81,7 @@ export function launchChrome(
       "--disable-backgrounding-occluded-windows",
       "--disable-renderer-backgrounding",
       ...(useKiosk ? ["--kiosk"] : []),
+      "about:blank", // Open a blank page so Stagehand can connect immediately
     ];
 
     if (opts.headless) {
@@ -93,15 +94,20 @@ export function launchChrome(
     });
 
     let stderr = "";
+    let devtoolsFound = false;
     const timeout = setTimeout(() => {
-      reject(new Error(`Chrome launch timed out. stderr:\n${stderr}`));
-      proc.kill();
+      if (!devtoolsFound) {
+        reject(new Error(`Chrome launch timed out after 15s. stderr:\n${stderr}`));
+        proc.kill();
+      }
     }, 15000);
 
     proc.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const data = chunk.toString();
+      stderr += data;
       const match = stderr.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (match) {
+      if (match && !devtoolsFound) {
+        devtoolsFound = true;
         clearTimeout(timeout);
         resolve({ process: proc, wsUrl: match[1] });
       }
