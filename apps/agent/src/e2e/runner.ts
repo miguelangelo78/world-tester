@@ -43,6 +43,7 @@ export async function executeE2ETest(
   prisma: PrismaClient,
   runId: string,
   testId: string, // Add testId parameter for visual regression
+  domain?: string, // Add domain parameter for homepage navigation
   sink?: OutputSink,
   signal?: AbortSignal,
 ): Promise<E2ERunResult> {
@@ -134,14 +135,39 @@ export async function executeE2ETest(
           // Remove any remaining quotes around the URL
           url = url.replace(/^["']|["']$/g, "");
           
-          // Extract just the URL from phrases like "the base URL https://..." or "base url https://..."
-          const urlMatch = url.match(/(https?:\/\/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s]*)/);
-          if (urlMatch) {
-            url = urlMatch[1];
+          // Check if this is referring to the application homepage/base URL
+          const isHomepageReference = url.toLowerCase().includes("base url") ||
+                                     url.toLowerCase().includes("homepage") ||
+                                     url.toLowerCase().includes("home page") ||
+                                     url.toLowerCase().includes("application");
+          
+          if (isHomepageReference && domain) {
+            // Use the domain provided in test settings for homepage/base URL references
+            url = domain.startsWith("http://") || domain.startsWith("https://") 
+              ? domain 
+              : `https://${domain}`;
+            sink?.info(`[Step ${stepNumber}] Homepage reference detected, using domain: ${url}`);
+          } else {
+            // Extract just the URL from phrases like "the base URL https://..." or "base url https://..."
+            // First try to match full URLs (http:// or https://)
+            let urlMatch = url.match(/https?:\/\/[^\s'"]+/);
+            if (urlMatch) {
+              url = urlMatch[0];
+            } else {
+              // If no full URL found, try domain patterns (something.com)
+              urlMatch = url.match(/[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s'"]*\b/);
+              if (urlMatch) {
+                url = urlMatch[0];
+              }
+            }
           }
           
-          // If it looks like a URL, use goto directly
-          if (url.startsWith("http://") || url.startsWith("https://") || url.includes(".")) {
+          // Check if we actually found a URL-like string
+          const hasValidUrl = url.includes("http://") || url.includes("https://") || 
+                             (url.includes(".") && !url.includes(" "));
+          
+          if (hasValidUrl) {
+            // We found a valid URL, use goto directly
             try {
               // Ensure URL has a protocol
               if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -150,14 +176,37 @@ export async function executeE2ETest(
               
               const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
               await page.goto(url, { waitUntil: "domcontentloaded" });
+              
+              // Check if the page loaded with an error (e.g., "This site can't be reached")
+              try {
+                const pageContent = await page.evaluate(() => document.documentElement.outerHTML);
+                const isErrorPage = pageContent.toLowerCase().includes("this site can't be reached") ||
+                                    pageContent.toLowerCase().includes("unable to reach") ||
+                                    pageContent.toLowerCase().includes("connection refused") ||
+                                    pageContent.toLowerCase().includes("err_") ||
+                                    pageContent.toLowerCase().includes("failed to load");
+                
+                if (isErrorPage) {
+                  throw new Error(`Failed to load ${url}: The site appears to be unreachable or returned an error page. Check that the URL is correct and accessible.`);
+                }
+              } catch (checkErr) {
+                // If we can't check page content, that's OK - just log it and continue
+                if (!String(checkErr).includes("is not a function")) {
+                  throw checkErr;
+                }
+                sink?.warn(`[Step ${stepNumber}] Could not verify page loaded successfully, but navigation completed`);
+              }
+              
               result.result = `Navigated to ${url}`;
               success = true;
               // Navigation doesn't cost tokens, skip cost tracking for goto
             } catch (navErr) {
-              throw new Error(`Failed to navigate to ${url}: ${navErr instanceof Error ? navErr.message : String(navErr)}`);
+              const errorMsg = navErr instanceof Error ? navErr.message : String(navErr);
+              throw new Error(`Failed to navigate to ${url}: ${errorMsg}`);
             }
           } else {
-            // Not a URL, use act() for other navigation instructions
+            // No valid URL found - use act() for natural language navigation or provide helpful error
+            sink?.info(`[Step ${stepNumber}] No URL detected in instruction, trying with Stagehand...`);
             const actResult = await stagehand.act(normalizedInstruction);
             if (actResult.success) {
               result.result = actResult.message || "Navigation completed";
@@ -165,7 +214,11 @@ export async function executeE2ETest(
               // Estimate cost for act() call: ~200 input tokens, ~100 output tokens (Claude pricing)
               costTracker.addTokens(200, 100);
             } else {
-              throw new Error(actResult.message || "Navigation failed");
+              throw new Error(
+                `Navigation instruction could not be understood: "${normalizedInstruction}"\n` +
+                `Error: ${actResult.message || "Navigation failed"}\n` +
+                `Tip: Use a direct URL like "Navigate to https://example.com" or "Go to example.com"`
+              );
             }
           }
         } else if (isWait) {
@@ -243,15 +296,29 @@ export async function executeE2ETest(
             const extractResult = await stagehand.extract(extractionPrompt);
             const resultText = unwrapExtraction(extractResult);
 
-            // Simple pass if extract returned meaningful data
-            if (resultText && resultText.length > 0) {
+            // Check if the result appears to be an error message (common patterns from Stagehand)
+            const isErrorMessage = resultText.toLowerCase().includes("cannot") ||
+                                   resultText.toLowerCase().includes("unable to") ||
+                                   resultText.toLowerCase().includes("not found") ||
+                                   resultText.toLowerCase().includes("could not") ||
+                                   resultText.toLowerCase().includes("does not contain") ||
+                                   resultText.toLowerCase().includes("failed to") ||
+                                   resultText.toLowerCase().includes("no data") ||
+                                   resultText.toLowerCase().includes("no information");
+
+            // Simple pass if extract returned meaningful data (and it's not an error message)
+            if (resultText && resultText.length > 0 && !isErrorMessage) {
               result.result = resultText;
               success = true;
               // Estimate cost for extract() call: ~300 input tokens, ~150 output tokens
               costTracker.addTokens(300, 150);
             } else {
-              // If extraction returned empty, try using act() instead for boolean checks
-              sink?.info(`[Step ${stepNumber}] Extraction returned no data, trying as action...`);
+              // If extraction returned empty or an error message, try using act() instead for boolean checks
+              if (isErrorMessage) {
+                sink?.info(`[Step ${stepNumber}] Extraction returned error: "${resultText}"`);
+              } else {
+                sink?.info(`[Step ${stepNumber}] Extraction returned no data, trying as action...`);
+              }
               const actResult = await stagehand.act(normalizedInstruction);
               if (actResult.success) {
                 result.result = actResult.message || "Assertion verified";

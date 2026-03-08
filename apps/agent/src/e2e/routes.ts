@@ -278,14 +278,14 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
         return res.status(400).json({ error: "Test has no steps defined. Please add steps before running." });
       }
 
-      // Create a dedicated browser instance for this E2E test
-      const e2eBrowser = await core.pool.spawn(`e2e-${id}`);
-      const stagehand = e2eBrowser.stagehand;
-
-      // Create run record
+      // Create run record first
       const run = await prisma.e2ETestRun.create({
         data: { testId: id, status: "running" },
       });
+
+      // Create a dedicated browser instance for this E2E test run (use run ID for unique names)
+      const e2eBrowser = await core.pool.spawn(`e2e-${run.id}`);
+      const stagehand = e2eBrowser.stagehand;
 
       // Log test details for debugging
       console.log(`[E2E] Starting test run: ${test.name} (${id})`);
@@ -303,6 +303,7 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
             prisma,
             run.id,
             test.id, // Pass testId
+            test.domain, // Pass domain for homepage navigation
             undefined, // sink
             undefined, // signal
           );

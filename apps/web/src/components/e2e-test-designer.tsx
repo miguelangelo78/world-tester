@@ -95,13 +95,47 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
           const response = await fetch(`http://localhost:3100/api/e2e/tests/${testId}`);
           if (!response.ok) throw new Error("Failed to fetch test");
           const data = await response.json();
+          console.log("[E2E Designer] API Response:", data);
           
           // Transform the data to match TestDefinition structure
+          let stepsArray: any[] = [];
+          
+          // Try to get steps from either location
+          if (Array.isArray(data.steps) && data.steps.length > 0) {
+            stepsArray = data.steps;
+          } else if (Array.isArray((data.definition as any)?.steps) && (data.definition as any).steps.length > 0) {
+            stepsArray = (data.definition as any).steps;
+          }
+          
+          // Transform steps to TestStep format if they're strings
+          const transformedSteps: TestStep[] = stepsArray.map((step: any, index: number) => {
+            if (typeof step === "string") {
+              // Step is just a string instruction
+              return {
+                id: `step-${index}-${Date.now()}`,
+                instruction: step,
+                order: index,
+              };
+            } else if (step.instruction) {
+              // Step is already an object with instruction
+              return {
+                id: step.id || `step-${index}-${Date.now()}`,
+                instruction: step.instruction,
+                order: step.order ?? index,
+              };
+            }
+            return {
+              id: `step-${index}-${Date.now()}`,
+              instruction: "",
+              order: index,
+            };
+          });
+          
           const transformedTest: TestDefinition = {
             name: data.name || "",
             description: data.description || "",
             domain: data.domain || "",
-            steps: Array.isArray(data.steps) ? data.steps : [],
+            steps: transformedSteps,
             retryCount: typeof data.retryCount === "number" ? data.retryCount : 2,
             strictnessLevel: data.strictnessLevel || "high",
             visualRegressionEnabled: data.visualRegressionEnabled !== false,
@@ -117,6 +151,7 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
             },
           };
           
+          console.log("[E2E Designer] Loaded test:", { name: transformedTest.name, stepsCount: transformedTest.steps.length, steps: transformedTest.steps });
           setTest(transformedTest);
           } catch (error) {
             console.error("Error fetching test:", error);
