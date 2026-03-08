@@ -222,10 +222,23 @@ async function main() {
             break;
           }
           case "e2e_create": {
+            // Extract domain from current browser context
+            let domain = "example.com"; // Fallback default
+            try {
+              const stagehand = pool.active().stagehand;
+              const pages = stagehand.context?.pages?.();
+              if (pages?.[0]) {
+                domain = new URL(pages[0].url()).hostname;
+              }
+            } catch (err) {
+              // Silently use default if browser context unavailable
+            }
+
             const test = await prisma.e2ETest.create({
               data: {
                 name: e2eCmd.name,
                 definition: { steps: e2eCmd.steps },
+                domain,
                 isActive: true,
               },
             });
@@ -256,7 +269,8 @@ async function main() {
                 sink,
               );
 
-              const domain = new URL(stagehand.context.pages()[0].url()).hostname;
+              const pages = stagehand.context?.pages?.();
+              const domain = pages?.[0] ? new URL(pages[0].url()).hostname : "unknown";
               await saveTestRun(prisma, memory, result, test.name, domain);
 
               display.success(`Test complete: ${result.status.toUpperCase()}`);

@@ -43,7 +43,7 @@ export class BrowserInstance {
   }
 
   tabs(): StagehandPage[] {
-    return this.stagehand.context.pages();
+    return this.stagehand.context?.pages?.() ?? [];
   }
 
   activeTab(): StagehandPage {

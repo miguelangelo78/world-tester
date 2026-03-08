@@ -292,6 +292,27 @@ Output shows:
 - **Cost Tracking** — All tests track LLM costs for budget monitoring
 - **Step History** — Every test run is saved with step-by-step results
 - **Scheduled Execution** — Via REST API (`/api/e2e`) or frontend dashboard (coming soon)
+- **Domain Scoping** — Organize tests by domain, each test is associated with a specific application
+- **Conversational Creation** — Create tests just by describing what you want to test in chat
+- **Dashboard UI** — Full web interface for creating, running, and monitoring tests
+- **Dedicated Browser Instances** — Each test run gets its own isolated browser for clean state
+- **Error Reporting** — Clear error messages when navigation fails or assertions don't pass
+
+#### Creating E2E Tests Conversationally
+
+The simplest way to create E2E tests — just describe what you want to test in natural language:
+
+```
+> Create an E2E test for example.com that navigates to the homepage, clicks the login button, enters credentials, and verifies the dashboard loads
+
+✓ E2E test "Login and dashboard verification" created successfully with 5 steps for domain: example.com
+```
+
+The agent will automatically:
+1. Parse your description into structured test steps
+2. Extract the domain from your message
+3. Create the test with sensible defaults
+4. Return the test ID for running
 
 #### E2E API
 
@@ -301,27 +322,38 @@ For programmatic test management, use the REST API:
 # List all tests
 curl http://localhost:3100/api/e2e/tests
 
+# List tests for a specific domain
+curl http://localhost:3100/api/e2e/tests?domain=example.com
+
+# Get all available domains
+curl http://localhost:3100/api/e2e/domains
+
 # Create a test
 curl -X POST http://localhost:3100/api/e2e/tests \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Login",
-    "definition": {
-      "steps": [
-        "Navigate to /login",
-        "Enter email test@example.com",
-        "Enter password SecurePass123"
-      ],
-      "retryCount": 2,
-      "strictnessLevel": "medium"
-    }
+    "domain": "example.com",
+    "description": "Test login flow",
+    "steps": [
+      "Navigate to the homepage",
+      "Click login button",
+      "Enter email test@example.com",
+      "Enter password SecurePass123",
+      "Click submit"
+    ],
+    "retryCount": 2,
+    "strictnessLevel": "medium"
   }'
 
 # Run a test
 curl -X POST http://localhost:3100/api/e2e/tests/{testId}/run
 
 # Get test results
-curl http://localhost:3100/api/e2e/runs/{runId}
+curl http://localhost:3100/api/e2e/tests/{testId}/results
+
+# Delete a test
+curl -X DELETE http://localhost:3100/api/e2e/tests/{testId}
 ```
 
 ### Built-in commands

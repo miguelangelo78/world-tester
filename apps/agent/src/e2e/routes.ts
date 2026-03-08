@@ -322,7 +322,8 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
             console.log(`[E2E] Test run completed: ${result.status}. Steps executed: ${result.steps.length}`);
           }
           
-          const domain = new URL(stagehand.context.pages()[0].url()).hostname;
+          const pages = stagehand.context?.pages?.();
+          const domain = pages?.[0] ? new URL(pages[0].url()).hostname : "unknown";
           await saveTestRun(prisma, core.memory, result, test.name, domain);
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -336,12 +337,13 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
             },
           });
         } finally {
-          // Close the dedicated E2E browser instance
+          // Close and remove the dedicated E2E browser instance from the pool
           try {
-            await e2eBrowser.close();
-            console.log(`[E2E] Closed browser instance for test ${id}`);
+            const browserName = `e2e-${run.id}`;
+            await core.pool.despawn(browserName);
+            console.log(`[E2E] Despawned browser instance for test ${id}`);
           } catch (closeErr) {
-            console.error(`[E2E] Error closing browser instance:`, closeErr);
+            console.error(`[E2E] Error despawning browser instance:`, closeErr);
           }
         }
       })();

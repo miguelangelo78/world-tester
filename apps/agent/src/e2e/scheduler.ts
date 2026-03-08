@@ -183,7 +183,8 @@ export class E2EScheduler {
         this.sink,
       );
 
-      const domain = new URL(stagehand.context.pages()[0].url()).hostname;
+      const pages = stagehand.context?.pages?.();
+      const domain = pages?.[0] ? new URL(pages[0].url()).hostname : "unknown";
       await saveTestRun(this.prisma, this.core.memory, result, test.name, domain);
 
       // Record run result

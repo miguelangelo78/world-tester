@@ -18,6 +18,7 @@ import {
 } from "./modes.js";
 import { extractPostCommandLearnings, runLearn } from "./learning.js";
 import { runSmartChat, runChat, addToHistory } from "./chat.js";
+import { parseE2ETestFromConversation, createE2ETestViaAPI } from "./e2e-creator.js";
 import { runTest } from "./test-runner.js";
 
 export class Orchestrator {
@@ -390,6 +391,25 @@ export class Orchestrator {
       case "observe":
         browserResult = await raceAbort(runExtract(stagehand, handoffInstruction), signal);
         break;
+      case "create_e2e_test":
+        try {
+          const domain = (chatResult.options?.domain as string) || this.resolveDomainFromStagehand(stagehand);
+          const e2eTest = await parseE2ETestFromConversation(
+            { instruction: handoffInstruction, domain },
+            this.config.generativeAiApiKey
+          );
+          const result = await createE2ETestViaAPI(e2eTest, this.config.apiUrl || "http://localhost:3100");
+          browserResult = {
+            success: true,
+            message: result.message,
+          };
+        } catch (err) {
+          browserResult = {
+            success: false,
+            message: `Failed to create E2E test: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+        break;
       default:
         browserResult = await raceAbort(runAct(stagehand, handoffInstruction), signal);
     }
@@ -453,7 +473,8 @@ export class Orchestrator {
       const browser = this.pool.findByStagehand(stagehand);
       if (browser) return browser.getUrl();
       // Fallback to Stagehand's own page tracking
-      const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
+      const pages = stagehand.context?.pages?.();
+      const page = (stagehand.context as any).activePage?.() ?? pages?.[0];
       return page?.url() ?? "about:blank";
     } catch {
       return "about:blank";

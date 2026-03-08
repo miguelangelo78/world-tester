@@ -8,7 +8,7 @@ import type { ConversationMessageDTO } from "@world-tester/shared";
 
 export type ChatAction =
   | "chat" | "task" | "act" | "goto" | "learn" | "extract" | "observe"
-  | "spawn_browser" | "switch_browser";
+  | "spawn_browser" | "switch_browser" | "create_e2e_test";
 
 export interface ChatResponse {
   action: ChatAction;
@@ -42,12 +42,14 @@ Actions:
   {"action": "extract", "instruction": "..."} — read data from the page or observe visual details
   {"action": "spawn_browser", "instruction": "<name>", "options": {"isolated": true}} — open a new browser instance
   {"action": "switch_browser", "instruction": "<name>"} — switch to an existing browser instance
+  {"action": "create_e2e_test", "instruction": "test description", "options": {"domain": "example.com"}} — create an E2E test
 
 Examples:
   "switch to light mode" → {"action": "act", "instruction": "click the dark/light mode toggle"}
   "change risk to 5%" → {"action": "task", "instruction": "change risk % to 5%"}
   "what pages have you learned?" → {"action": "chat"}
   "go to account settings" → {"action": "task", "instruction": "navigate to account settings page"}
+  "create e2e test for example.com that clicks login and verifies dashboard" → {"action": "create_e2e_test", "instruction": "navigate to homepage, click login button, enter credentials, verify dashboard loads", "options": {"domain": "example.com"}}
   "click the save button" → {"action": "act", "instruction": "click the Save button"}
   "let's try that again" → {"action": "task", "instruction": "..."} (infer from context what to retry)
   "open a new browser as userB" → {"action": "spawn_browser", "instruction": "userB", "options": {"isolated": true}}
@@ -293,7 +295,7 @@ function parseActionJson(
 ): { action: ChatAction; message?: string; instruction?: string; options?: Record<string, unknown> } | null {
   const validActions: ChatAction[] = [
     "chat", "task", "act", "goto", "learn", "extract", "observe",
-    "spawn_browser", "switch_browser",
+    "spawn_browser", "switch_browser", "create_e2e_test",
   ];
 
   // Strip markdown code fences if present

@@ -24,7 +24,7 @@ function getActivePage(stagehand: Stagehand): StagehandPage {
     const ap = ctx.activePage();
     if (ap) return ap;
   }
-  return stagehand.context.pages()[0];
+  return stagehand.context?.pages?.()?.[0] ?? null;
 }
 
 /**

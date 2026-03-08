@@ -21,9 +21,11 @@ export function loadConfig(): AppConfig {
     cuaModel: "google/gemini-2.5-computer-use-preview-10-2025",
     utilityModel: "google/gemini-2.5-flash",
     apiKey,
+    generativeAiApiKey: apiKey,
     headless: process.env.HEADLESS === "true",
     targetUrl: process.env.TARGET_URL || undefined,
     dataDir: "./data",
+    apiUrl: process.env.API_URL || "http://localhost:3100",
     viewport: { width: 1288, height: 711 },
   };
 }
