@@ -20,6 +20,7 @@ import {
   Pencil,
   Archive,
   Globe,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgent } from "./agent-provider";
@@ -27,6 +28,7 @@ import type { ConversationInfo } from "@world-tester/shared";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: Terminal },
+  { href: "/e2e", label: "E2E", icon: Zap },
   { href: "/history", label: "History", icon: History },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/knowledge", label: "Knowledge", icon: Brain },

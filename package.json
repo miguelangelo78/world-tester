@@ -27,6 +27,14 @@
     "postinstall": "npm run db:generate -w @world-tester/agent 2>/dev/null; npx -w @world-tester/agent playwright install chromium 2>/dev/null; true"
   },
   "devDependencies": {
+    "@types/nodemailer": "^7.0.11",
+    "@types/pdfkit": "^0.17.5",
     "concurrently": "^9.1.2"
+  },
+  "dependencies": {
+    "@types/express": "^5.0.6"
+  },
+  "optionalDependencies": {
+    "lightningcss-linux-x64-gnu": "^1.31.1"
   }
 }

@@ -1,11 +1,15 @@
 import http from "http";
 import fs from "fs";
 import path from "path";
+import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { createAgentCore, AgentCore } from "./core.js";
 import { isAbortError } from "./abort.js";
+import { createE2ERouter } from "./e2e/routes.js";
+import { initializeScheduler } from "./e2e/scheduler.js";
 import { parseCommand, parseBrowserCommand, getHelpText } from "./cli/parser.js";
 import { getCurrentUrl, getDomain } from "./browser/stagehand.js";
+import prisma from "./db.js";
 import type { OutputSink } from "./output-sink.js";
 import type {
   WSMessage,
@@ -555,47 +559,61 @@ async function main() {
   const core = await createAgentCore(sink);
   console.log(`[agent-server] Agent ready. Starting server on port ${PORT}...`);
 
+  // Initialize E2E Scheduler
+  const scheduler = initializeScheduler(
+    prisma,
+    core,
+    {
+      enabled: process.env.SCHEDULER_ENABLED !== "false",
+      maxConcurrentTests: parseInt(process.env.MAX_CONCURRENT_TESTS || "2"),
+      retryFailedTests: process.env.RETRY_FAILED_TESTS !== "false",
+    },
+    sink,
+  );
+  await scheduler.start();
+
   const SCREENSHOTS_DIR = path.resolve("data", "screenshots");
 
-  const httpServer = http.createServer((req, res) => {
-    // CORS headers for frontend access
+  const app = express();
+  app.use(express.json());
+
+  // CORS middleware
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
     if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
+      res.sendStatus(204);
+    } else {
+      next();
     }
-
-    if (req.method === "GET" && req.url?.startsWith("/screenshots/")) {
-      const fileName = decodeURIComponent(req.url.slice("/screenshots/".length));
-      const safeName = path.basename(fileName);
-      const filePath = path.join(SCREENSHOTS_DIR, safeName);
-
-      if (!fs.existsSync(filePath)) {
-        res.writeHead(404, { "Content-Type": "text/plain" });
-        res.end("Not found");
-        return;
-      }
-
-      const ext = path.extname(safeName).toLowerCase();
-      const mimeTypes: Record<string, string> = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-      };
-
-      res.writeHead(200, { "Content-Type": mimeTypes[ext] ?? "application/octet-stream" });
-      fs.createReadStream(filePath).pipe(res);
-      return;
-    }
-
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Not found");
   });
+
+  // Screenshot serving
+  app.get("/screenshots/:filename", (req: express.Request, res: express.Response) => {
+    const safeName = path.basename(String(req.params.filename));
+    const filePath = path.join(SCREENSHOTS_DIR, safeName);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Not found");
+    }
+
+    const ext = path.extname(safeName).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp",
+    };
+
+    res.setHeader("Content-Type", mimeTypes[ext] ?? "application/octet-stream");
+    fs.createReadStream(filePath).pipe(res);
+  });
+
+  // E2E test routes
+  app.use("/api/e2e", createE2ERouter(core, prisma));
+
+  const httpServer = http.createServer(app);
 
   const wss = new WebSocketServer({ server: httpServer });
 
@@ -703,6 +721,7 @@ async function main() {
     console.log("\n[agent-server] Shutting down...");
     wss.close();
     httpServer.close();
+    await scheduler.stop();
     await core.shutdown();
     process.exit(0);
   });

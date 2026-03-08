@@ -224,6 +224,106 @@ The agent supports persistent conversations — switch between them, resume old 
 
 Conversations auto-title based on the first command you send. All output is persisted — you can close the browser, restart the agent, and pick up where you left off.
 
+### E2E Testing
+
+Create, run, and manage automated end-to-end tests with natural language steps:
+
+| Command | Description |
+|---------|-------------|
+| `e2e list` | List all e2e tests |
+| `e2e create "name" "step1"; "step2"; "step3"` | Create a new e2e test with natural language steps |
+| `e2e run <testId>` | Run a test and see real-time progress |
+| `e2e results <testId>` | Show recent test results and history |
+| `e2e delete <testId>` | Delete a test |
+
+#### E2E Testing Examples
+
+**Create a simple login test:**
+```
+e2e create "Login Flow" "Navigate to /login"; "Enter email test@example.com"; "Enter password SecurePass123"; "Click Login"; "Assert user is logged in"
+```
+
+**Create a multi-step checkout test:**
+```
+e2e create "Checkout" \
+  "Navigate to /shop"; \
+  "Add item to cart"; \
+  "Click cart icon"; \
+  "Click checkout"; \
+  "Fill shipping address"; \
+  "Select payment method"; \
+  "Click confirm order"; \
+  "Assert order confirmation page appears"
+```
+
+**Run a test:**
+```
+e2e run abc12345
+```
+
+Output shows:
+- Real-time step progress (Thinking → Pass/Fail)
+- Screenshots captured for visual regression
+- Total duration and cost
+- Retry attempts if steps fail
+
+**View test history:**
+```
+e2e results abc12345
+```
+
+Output shows:
+```
+ℹ Recent runs for test abc12345:
+  [PASSED] 1/21/2025 (12.3s)
+  [FAILED] 1/20/2025 (8.5s)
+  [PASSED] 1/19/2025 (11.2s)
+```
+
+#### E2E Features
+
+- **Natural Language Steps** — No CSS selectors needed. Stagehand's AI understands descriptive instructions
+- **Automatic Retry** — Failed steps retry automatically (configurable, default 2 retries)
+- **Visual Regression** — Auto-screenshots every step for regression detection
+- **Strictness Levels** — Configure how strictly tests fail:
+  - `low` — Skip failed steps, continue
+  - `medium` — Log failures, continue (default)
+  - `high` — Stop on first failure
+- **Cost Tracking** — All tests track LLM costs for budget monitoring
+- **Step History** — Every test run is saved with step-by-step results
+- **Scheduled Execution** — Via REST API (`/api/e2e`) or frontend dashboard (coming soon)
+
+#### E2E API
+
+For programmatic test management, use the REST API:
+
+```bash
+# List all tests
+curl http://localhost:3100/api/e2e/tests
+
+# Create a test
+curl -X POST http://localhost:3100/api/e2e/tests \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Login",
+    "definition": {
+      "steps": [
+        "Navigate to /login",
+        "Enter email test@example.com",
+        "Enter password SecurePass123"
+      ],
+      "retryCount": 2,
+      "strictnessLevel": "medium"
+    }
+  }'
+
+# Run a test
+curl -X POST http://localhost:3100/api/e2e/tests/{testId}/run
+
+# Get test results
+curl http://localhost:3100/api/e2e/runs/{runId}
+```
+
 ### Built-in commands
 
 - `help` — Show available commands
@@ -243,6 +343,12 @@ Conversations auto-title based on the first command you send. All output is pers
 > c: what pages have you learned so far?
 > a: click the dark mode toggle
 > e: get all the form fields on this page
+
+# E2E Testing
+> e2e list
+> e2e create "User Registration" "Navigate to /signup"; "Enter email test@example.com"; "Enter password SecurePass123"; "Click signup"; "Assert confirmation email banner"
+> e2e run abc12345
+> e2e results abc12345
 
 # Multi-browser: test that admin changes are visible to a regular user
 > browser:spawn admin --isolated

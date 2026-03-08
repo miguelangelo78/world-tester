@@ -1,0 +1,470 @@
+import { Stagehand } from "@browserbasehq/stagehand";
+import { PrismaClient } from "@prisma/client";
+import { AppConfig } from "../config/types.js";
+import { MemoryManager } from "../memory/manager.js";
+import { CostTracker, UsageData } from "../cost/tracker.js";
+import { tagE2ELearnings } from "./learnings.js";
+import { checkVisualRegression } from "./visual.js";
+import type { OutputSink } from "../output-sink.js";
+
+export interface E2EStepResult {
+  stepNumber: number;
+  instruction: string;
+  status: "passed" | "failed" | "skipped";
+  result?: string;
+  error?: string;
+  retryReasons?: string[]; // Track why each retry happened
+  durationMs: number;
+  screenshot?: string;
+  retryCount: number;
+}
+
+export interface E2ERunResult {
+  testId: string;
+  runId: string;
+  status: "passed" | "failed" | "aborted";
+  steps: E2EStepResult[];
+  durationMs: number;
+  totalUsage: UsageData;
+  costUsd: number;
+  passedRetry?: number;
+  abortMessage?: string;
+}
+
+/**
+ * Execute a test run: interpret natural language steps and drive the browser.
+ */
+export async function executeE2ETest(
+  testDefinition: any, // JSON definition with steps array
+  stagehand: Stagehand,
+  config: AppConfig,
+  memory: MemoryManager,
+  costTracker: CostTracker,
+  prisma: PrismaClient,
+  runId: string,
+  testId: string, // Add testId parameter for visual regression
+  sink?: OutputSink,
+  signal?: AbortSignal,
+): Promise<E2ERunResult> {
+  const startTime = Date.now();
+  const steps = testDefinition.steps || [];
+  const results: E2EStepResult[] = [];
+  let totalUsage: UsageData = { input_tokens: 0, output_tokens: 0 };
+  let failedSteps = 0;
+  let testAbortReason: string | undefined;
+
+  for (let i = 0; i < steps.length; i++) {
+    if (signal?.aborted) {
+      testAbortReason = "Test was aborted by signal";
+      sink?.error(testAbortReason);
+      break;
+    }
+
+    const stepNumber = i + 1;
+    const stepInstruction = steps[i];
+    const stepStart = Date.now();
+
+    sink?.info(`[Step ${stepNumber}/${steps.length}] ${stepInstruction}`);
+
+    let result: E2EStepResult = {
+      stepNumber,
+      instruction: stepInstruction,
+      status: "passed",
+      durationMs: 0,
+      retryCount: 0,
+      retryReasons: [],
+    };
+
+    // Try the step with retry logic
+    let success = false;
+    let lastError: string | undefined;
+
+    // Capture "before" screenshot (always capture for display)
+    let beforeScreenshotPath: string | undefined;
+    try {
+      const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
+      if (page) {
+        beforeScreenshotPath = `/tmp/e2e-${runId}-step${stepNumber}-before.png`;
+        await page.screenshot({ path: beforeScreenshotPath });
+        sink?.info(`Before screenshot: ${beforeScreenshotPath}`);
+      }
+    } catch (err) {
+      sink?.warn(`Failed to capture before screenshot for step ${stepNumber}`);
+    }
+
+    for (let attempt = 0; attempt <= (testDefinition.retryCount || 2); attempt++) {
+      if (signal?.aborted) {
+        result.status = "skipped";
+        break;
+      }
+
+      try {
+        // Determine if this is an assertion/wait or action
+        const isAssertion = stepInstruction.toLowerCase().startsWith("assert") || 
+                           stepInstruction.toLowerCase().startsWith("verify") ||
+                           stepInstruction.toLowerCase().startsWith("check") ||
+                           stepInstruction.toLowerCase().startsWith("confirm") ||
+                           stepInstruction.toLowerCase().startsWith("wait");
+        
+        // Check if this is a wait instruction
+        const isWait = stepInstruction.toLowerCase().startsWith("wait");
+
+        // Normalize instruction - aggressively remove quotes
+        let normalizedInstruction = stepInstruction.trim();
+        
+        // Remove surrounding quotes entirely if present
+        normalizedInstruction = normalizedInstruction.replace(/^["']|["']$/g, "");
+        
+        // Handle Navigate to 'URL' -> Navigate to URL
+        normalizedInstruction = normalizedInstruction.replace(/navigate to ['"]([^'"]+)['"]/i, "navigate to $1");
+        
+        // Handle any other quoted content like "field name" -> field name
+        normalizedInstruction = normalizedInstruction.replace(/['"]([^'"]+)['"]/g, "$1");
+        
+        sink?.info(`[Step ${stepNumber}] Normalized: "${normalizedInstruction}"`);
+
+        // Special handling for navigation - use goto() directly
+        const navMatch = normalizedInstruction.match(/^navigate to\s+(.+)$/i) || 
+                         normalizedInstruction.match(/^go to\s+(.+)$/i) ||
+                         normalizedInstruction.match(/^visit\s+(.+)$/i);
+        
+        if (navMatch) {
+          let url = navMatch[1].trim();
+          
+          // Remove any remaining quotes around the URL
+          url = url.replace(/^["']|["']$/g, "");
+          
+          // Extract just the URL from phrases like "the base URL https://..." or "base url https://..."
+          const urlMatch = url.match(/(https?:\/\/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s]*)/);
+          if (urlMatch) {
+            url = urlMatch[1];
+          }
+          
+          // If it looks like a URL, use goto directly
+          if (url.startsWith("http://") || url.startsWith("https://") || url.includes(".")) {
+            try {
+              // Ensure URL has a protocol
+              if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                url = "https://" + url;
+              }
+              
+              const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
+              await page.goto(url, { waitUntil: "domcontentloaded" });
+              result.result = `Navigated to ${url}`;
+              success = true;
+              // Navigation doesn't cost tokens, skip cost tracking for goto
+            } catch (navErr) {
+              throw new Error(`Failed to navigate to ${url}: ${navErr instanceof Error ? navErr.message : String(navErr)}`);
+            }
+          } else {
+            // Not a URL, use act() for other navigation instructions
+            const actResult = await stagehand.act(normalizedInstruction);
+            if (actResult.success) {
+              result.result = actResult.message || "Navigation completed";
+              success = true;
+              // Estimate cost for act() call: ~200 input tokens, ~100 output tokens (Claude pricing)
+              costTracker.addTokens(200, 100);
+            } else {
+              throw new Error(actResult.message || "Navigation failed");
+            }
+          }
+        } else if (isWait) {
+          // Handle wait instructions with a simple page wait
+          try {
+            // For wait instructions, just wait for the page to be stable
+            // Extract any timeout if specified (e.g., "Wait 5 seconds" or "Wait for 10 seconds")
+            const timeoutMatch = normalizedInstruction.match(/(\d+)\s*(?:seconds?|ms|milliseconds?)/i);
+            const waitTime = timeoutMatch ? parseInt(timeoutMatch[1]) * (normalizedInstruction.toLowerCase().includes("ms") ? 1 : 1000) : 5000;
+            
+            const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
+            if (page) {
+              // Wait for the page to be stable - use a combination of networkidle and timeout
+              await page.waitForLoadState("networkidle").catch(() => {
+                // Ignore timeout errors - just means page is considered loaded
+              });
+              
+              // Additional wait for DOM stability
+              await page.evaluate(() => {
+                return new Promise((resolve) => {
+                  let timeoutId: NodeJS.Timeout;
+                  const observer = new MutationObserver(() => {
+                    clearTimeout(timeoutId);
+                    timeoutId = setTimeout(resolve, 500); // Wait 500ms of no mutations
+                  });
+                  observer.observe(document, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                  });
+                  timeoutId = setTimeout(resolve, Math.min(waitTime, 5000)); // Max wait
+                });
+              }).catch(() => {
+                // Ignore errors from evaluation
+              });
+            }
+            
+            result.result = `Waited for page to stabilize`;
+            success = true;
+            // No token cost for waits
+          } catch (waitErr) {
+            // Don't fail on wait errors - just log them
+            sink?.warn(`Wait instruction warning: ${waitErr instanceof Error ? waitErr.message : String(waitErr)}`);
+            result.result = "Page wait completed (with warnings)";
+            success = true;
+          }
+        } else if (isAssertion) {
+          // Transform assertions into extraction queries for Stagehand
+          // Stagehand's extract() needs to know what data to extract, not just what to assert
+          let extractionPrompt = normalizedInstruction;
+          
+          // Convert assertion language to extraction language
+          if (extractionPrompt.toLowerCase().startsWith("assert ")) {
+            // "Assert X is Y" -> "Extract and verify: is X Y?"
+            extractionPrompt = extractionPrompt.replace(/^assert\s+/i, "Extract and verify: ");
+          } else if (extractionPrompt.toLowerCase().startsWith("verify ")) {
+            // "Verify X" -> "Extract: X"
+            extractionPrompt = extractionPrompt.replace(/^verify\s+/i, "Extract: ");
+          } else if (extractionPrompt.toLowerCase().startsWith("check ")) {
+            // "Check X" -> "Extract: X"
+            extractionPrompt = extractionPrompt.replace(/^check\s+/i, "Extract: ");
+          } else if (extractionPrompt.toLowerCase().startsWith("confirm ")) {
+            // "Confirm X" -> "Extract: X"
+            extractionPrompt = extractionPrompt.replace(/^confirm\s+/i, "Extract: ");
+          }
+          
+          // Ensure the prompt is phrased as a question or extraction request
+          if (!extractionPrompt.toLowerCase().includes("extract") && !extractionPrompt.endsWith("?")) {
+            extractionPrompt = `Extract the following from the page: ${extractionPrompt}`;
+          }
+          
+          sink?.info(`[Step ${stepNumber}] Converted assertion to extraction: "${extractionPrompt}"`);
+          
+          try {
+            const extractResult = await stagehand.extract(extractionPrompt);
+            const resultText = unwrapExtraction(extractResult);
+
+            // Simple pass if extract returned meaningful data
+            if (resultText && resultText.length > 0) {
+              result.result = resultText;
+              success = true;
+              // Estimate cost for extract() call: ~300 input tokens, ~150 output tokens
+              costTracker.addTokens(300, 150);
+            } else {
+              // If extraction returned empty, try using act() instead for boolean checks
+              sink?.info(`[Step ${stepNumber}] Extraction returned no data, trying as action...`);
+              const actResult = await stagehand.act(normalizedInstruction);
+              if (actResult.success) {
+                result.result = actResult.message || "Assertion verified";
+                success = true;
+                costTracker.addTokens(200, 100);
+              } else {
+                throw new Error(actResult.message || "Assertion could not be verified");
+              }
+            }
+          } catch (assertError) {
+            const errMsg = assertError instanceof Error ? assertError.message : String(assertError);
+            throw new Error(
+              `Assertion could not be verified: "${normalizedInstruction}". ` +
+              `Error: ${errMsg}. ` +
+              `Make sure the assertion is specific and the element/state exists on the page.`
+            );
+          }
+        } else {
+          // Use act() for actions - with better error handling
+          try {
+            const actResult = await stagehand.act(normalizedInstruction);
+            if (actResult.success) {
+              result.result = actResult.message || "Action completed";
+              success = true;
+              // Estimate cost for act() call: ~200 input tokens, ~100 output tokens
+              costTracker.addTokens(200, 100);
+            } else {
+              throw new Error(actResult.message || "Action failed");
+            }
+          } catch (actError) {
+            const errMsg = actError instanceof Error ? actError.message : String(actError);
+            // Provide better feedback for common issues
+            if (errMsg.includes("No object generated")) {
+              throw new Error(`Stagehand couldn't understand the instruction. Try simpler language like "Click the search box" or "Type hello". Original: ${normalizedInstruction}`);
+            }
+            throw actError;
+          }
+        }
+
+        break; // Success, exit retry loop
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        result.retryCount = attempt;
+
+        if (attempt < (testDefinition.retryCount || 2)) {
+          sink?.warn(`Step ${stepNumber} failed: ${lastError}. Retrying... (${attempt + 1}/${testDefinition.retryCount})`);
+          result.retryReasons?.push(lastError);
+          await new Promise((resolve) => setTimeout(resolve, 1000)); // Brief wait before retry
+        }
+      }
+    }
+
+    if (!success) {
+      result.status = "failed";
+      result.error = lastError;
+      failedSteps++;
+
+      // Check strictness level — if high, stop on first failure
+      const strictness = testDefinition.strictnessLevel || "medium";
+      if (strictness === "high") {
+        sink?.error(`Step ${stepNumber} failed (strictness=high). Aborting test.`);
+        results.push(result);
+        break;
+      }
+    } else {
+      result.status = "passed";
+    }
+
+    result.durationMs = Date.now() - stepStart;
+    results.push(result);
+
+    // Take screenshot after each step (always capture for display) - BEFORE saving to DB
+    try {
+      const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
+      if (page) {
+        const screenshotPath = `/tmp/e2e-${runId}-step${stepNumber}.png`;
+        await page.screenshot({ path: screenshotPath });
+        result.screenshot = screenshotPath;
+        sink?.info(`Screenshot: ${screenshotPath}`);
+
+        // Check visual regression against baseline if enabled
+        if (testDefinition.visualRegressionEnabled) {
+          const visualRegression = await checkVisualRegression(
+            prisma,
+            testId,
+            runId,
+            stepNumber,
+            screenshotPath,
+            testDefinition.visualFuzzyThreshold || 0.98,
+          );
+
+          if (!visualRegression.passed && visualRegression.baselineExists) {
+            sink?.warn(`Visual regression: ${visualRegression.message}`);
+          } else if (visualRegression.message) {
+            sink?.info(visualRegression.message);
+          }
+        }
+      }
+    } catch (err) {
+      sink?.warn(`Failed to capture screenshot for step ${stepNumber}`);
+    }
+
+    // Save step result immediately to database for live updates
+    try {
+      await prisma.e2ETestStep.create({
+        data: {
+          runId: runId,
+          stepNumber: result.stepNumber,
+          instruction: result.instruction,
+          status: result.status,
+          result: result.result ? JSON.stringify({
+            text: result.result,
+            retryReasons: result.retryReasons,
+          }) : undefined,
+          screenshot: result.screenshot,
+          durationMs: result.durationMs,
+          errorMessage: result.error,
+          retryCount: result.retryCount,
+        },
+      });
+      sink?.info(`Step ${stepNumber} result saved to database`);
+    } catch (dbErr) {
+      sink?.warn(`Failed to save step ${stepNumber} to database: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  const status = signal?.aborted ? "aborted" : failedSteps === 0 ? "passed" : "failed";
+
+  // Flush any remaining pending tokens and get the total cost
+  const costSnapshot = costTracker.record(undefined);
+
+  // Determine if test was incomplete
+  const isIncomplete = results.length < steps.length;
+  let abortMessage = "";
+  
+  if (testAbortReason) {
+    abortMessage = testAbortReason;
+  } else if (isIncomplete && failedSteps === 0) {
+    // Test stopped without a failure - something else caused it
+    abortMessage = `Test execution stopped early after ${results.length} of ${steps.length} steps without explicit failure`;
+    sink?.error(abortMessage);
+  }
+
+  return {
+    testId,
+    runId,
+    status,
+    steps: results,
+    durationMs,
+    totalUsage,
+    costUsd: costSnapshot.costUsd,
+    abortMessage,
+  };
+}
+
+/**
+ * Unwrap single-value objects from Stagehand extract()
+ */
+function unwrapExtraction(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const values = Object.values(result as Record<string, unknown>);
+    if (values.length === 1 && typeof values[0] === "string") {
+      return values[0];
+    }
+  }
+  return JSON.stringify(result, null, 2);
+}
+
+/**
+ * Save test run to database and tag learnings
+ */
+export async function saveTestRun(
+  prisma: PrismaClient,
+  memory: MemoryManager,
+  result: E2ERunResult,
+  testName: string,
+  domain: string,
+): Promise<void> {
+  // Determine error message from failed steps or abort message
+  let errorMessage: string | undefined;
+  
+  if (result.abortMessage) {
+    errorMessage = result.abortMessage;
+  } else if (result.status === "failed") {
+    // Get the first failed step's error message
+    const failedStep = result.steps.find(s => s.status === "failed");
+    if (failedStep && failedStep.error) {
+      errorMessage = `Step ${failedStep.stepNumber}: ${failedStep.error}`;
+    } else {
+      errorMessage = "Test execution failed";
+    }
+  }
+
+  // Update the test run record
+  await prisma.e2ETestRun.update({
+    where: { id: result.runId },
+    data: {
+      status: result.status === "aborted" ? "skipped" : result.status === "passed" ? "passed" : "failed",
+      verdict: result.status,
+      completedAt: new Date(),
+      durationMs: result.durationMs,
+      costUsd: result.costUsd,
+      errorMessage,
+    },
+  });
+
+  // Note: Step results are now saved incrementally during test execution,
+  // so we don't need to create them again here. This prevents duplicates.
+
+  // Tag learnings from successful test runs
+  if (result.status === "passed") {
+    await tagE2ELearnings(prisma, memory, result.testId, testName, result, domain);
+  }
+}

@@ -18,8 +18,13 @@
     "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "@world-tester/shared": "*",
+    "axios": "^1.13.6",
     "chalk": "^5.4.1",
     "dotenv": "^16.4.7",
+    "html2pdf": "^0.0.11",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.1",
+    "pdfkit": "^0.17.2",
     "pg": "^8.18.0",
     "ws": "^8.18.0",
     "zod": "^3.24.2"

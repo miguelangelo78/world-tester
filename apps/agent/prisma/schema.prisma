@@ -105,3 +105,170 @@ model ConversationMessage {
 
   @@index([conversationId, timestamp])
 }
+
+// ── E2E Test Models ────────────────────────────────────────────────
+
+model E2ETest {
+  id                String                @id @default(cuid())
+  name              String
+  description       String?
+  domain            String                // The target domain for this test (e.g., "example.com")
+  definition        Json                  // YAML steps as JSON
+  scope             String                @default("global") // "global" or project-scoped
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  versionNumber     Int                   @default(1)
+  isActive          Boolean               @default(true)
+  
+  // Configuration
+  retryCount        Int                   @default(2)
+  strictnessLevel   String                @default("medium") // "low", "medium", "high"
+  setupSteps        Json?                 // Pre-test setup steps
+  teardownSteps     Json?                 // Post-test cleanup steps
+  timeout           Int                   @default(300000) // ms
+  
+  // Visual regression config
+  visualRegressionEnabled Boolean          @default(true)
+  autoApproveBaseline     Boolean          @default(false)
+  visualFuzzyThreshold    Float            @default(0.98) // 0-1
+  
+  // Notification config
+  notifyOnFailure   String[]              @default([]) // "email", "slack", "webhook"
+  notifyOnSuccess   Boolean               @default(false)
+  
+  // Scheduling
+  cronSchedule      String?               // e.g. "0 */6 * * *" for every 6 hours
+  nextScheduledRun  DateTime?
+  lastScheduledRun  DateTime?
+  
+  runs              E2ETestRun[]
+  versions          E2ETestVersion[]
+  visualBaselines   E2EVisualBaseline[]
+  scheduledJobs     E2EScheduledJob[]
+  
+  @@index([domain])
+  @@index([scope, isActive])
+  @@index([cronSchedule])
+}
+
+model E2ETestVersion {
+  id        String   @id @default(cuid())
+  testId    String
+  test      E2ETest  @relation(fields: [testId], references: [id], onDelete: Cascade)
+  version   Int
+  definition Json   // Snapshot of test at this version
+  createdAt DateTime @default(now())
+  changedBy String?
+  changeReason String?
+  
+  @@unique([testId, version])
+  @@index([testId])
+}
+
+model E2ETestRun {
+  id            String              @id @default(cuid())
+  testId        String
+  test          E2ETest             @relation(fields: [testId], references: [id], onDelete: Cascade)
+  
+  // Scheduled execution tracking
+  isScheduled   Boolean             @default(false)
+  scheduledJobId String?
+  scheduledJob  E2EScheduledJob?    @relation(fields: [scheduledJobId], references: [id], onDelete: SetNull)
+  
+  status        String              @default("running") // "running", "passed", "failed", "skipped"
+  verdict       String?             // "pass", "fail", "aborted"
+  passedRetry   Int?                // Which retry it passed on (null if first try)
+  
+  startedAt     DateTime            @default(now())
+  completedAt   DateTime?
+  durationMs    Int?
+  
+  errorMessage  String?
+  costUsd       Float               @default(0)
+  
+  steps         E2ETestStep[]
+  visualDiffs   E2EVisualDiff[]
+  
+  @@index([testId, startedAt])
+  @@index([status])
+}
+
+model E2ETestStep {
+  id        String        @id @default(cuid())
+  runId     String
+  run       E2ETestRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  
+  stepNumber  Int
+  instruction String      // The natural language step
+  status      String      // "running", "passed", "failed", "skipped"
+  
+  result      String?     // Output/evidence
+  screenshot  String?     // Path or URL to screenshot
+  durationMs  Int?
+  
+  errorMessage String?
+  retryCount  Int         @default(0)
+  
+  @@index([runId, stepNumber])
+}
+
+model E2EVisualBaseline {
+  id        String    @id @default(cuid())
+  testId    String
+  test      E2ETest   @relation(fields: [testId], references: [id], onDelete: Cascade)
+  
+  stepNumber Int
+  screenshotPath String // Path to baseline screenshot
+  createdAt DateTime  @default(now())
+  approvedAt DateTime?
+  approvedBy String?
+  
+  @@unique([testId, stepNumber])
+  @@index([testId])
+}
+
+model E2EVisualDiff {
+  id        String      @id @default(cuid())
+  runId     String
+  run       E2ETestRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  
+  stepNumber Int
+  baselinePath String
+  currentPath String
+  diffPath   String      // Screenshot showing diff
+  
+  similarity Float       // 0-1, how similar baseline and current are
+  approved   Boolean     @default(false)
+  
+  @@index([runId])
+}
+
+model E2EScheduledJob {
+  id        String    @id @default(cuid())
+  testId    String    @unique
+  test      E2ETest   @relation(fields: [testId], references: [id], onDelete: Cascade)
+  cronSchedule String
+  notificationConfig Json?   // { emailEnabled, emailAddresses[], slackEnabled, slackWebhook, webhookEnabled, webhookUrl }
+  enabled   Boolean   @default(true)
+  
+  runs      E2ETestRun[]
+  
+  lastRunAt DateTime?
+  nextRunAt DateTime?
+  
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// Tag learnings that come from e2e tests
+model E2ELearning {
+  id           String   @id @default(cuid())
+  learningId   String   // Reference to Learning model
+  testRunId    String
+  testId       String
+  
+  createdAt    DateTime @default(now())
+  
+  @@unique([learningId, testRunId])
+  @@index([testId, createdAt])
+}

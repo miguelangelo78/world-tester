@@ -36,6 +36,17 @@ export type ConversationCommand =
   | { type: "conv_rename"; title: string }
   | { type: "conv_archive" };
 
+export type E2ECommand =
+  | { type: "e2e_list" }
+  | { type: "e2e_create"; name: string; steps: string[] }
+  | { type: "e2e_run"; testId: string }
+  | { type: "e2e_results"; testId: string }
+  | { type: "e2e_delete"; testId: string }
+  | { type: "e2e_schedule"; testId: string; cronSchedule: string }
+  | { type: "e2e_schedules" }
+  | { type: "e2e_schedule_pause"; jobId: string }
+  | { type: "e2e_schedule_resume"; jobId: string };
+
 const PREFIX_MAP: Record<string, CommandMode> = {
   "e:": "extract",
   "a:": "act",
@@ -144,6 +155,72 @@ export function parseConversationCommand(input: string): ConversationCommand | n
 }
 
 /**
+ * Parse e2e test commands.
+ * Returns null when the input is not an e2e command.
+ */
+export function parseE2ECommand(input: string): E2ECommand | null {
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower === "e2e" || lower === "e2e list") {
+    return { type: "e2e_list" };
+  }
+
+  const createMatch = trimmed.match(/^e2e\s+create\s+"([^"]+)"\s+(.+)$/i);
+  if (createMatch) {
+    const name = createMatch[1];
+    // Parse steps as comma-separated lines enclosed in quotes
+    const stepsStr = createMatch[2];
+    const steps = stepsStr
+      .split(/;|,/)
+      .map((s) => s.trim())
+      .filter((s) => s && s.startsWith('"') && s.endsWith('"'))
+      .map((s) => s.slice(1, -1));
+
+    if (steps.length > 0) {
+      return { type: "e2e_create", name, steps };
+    }
+  }
+
+  const runMatch = trimmed.match(/^e2e\s+run\s+(\S+)$/i);
+  if (runMatch) {
+    return { type: "e2e_run", testId: runMatch[1] };
+  }
+
+  const resultsMatch = trimmed.match(/^e2e\s+results\s+(\S+)$/i);
+  if (resultsMatch) {
+    return { type: "e2e_results", testId: resultsMatch[1] };
+  }
+
+  const deleteMatch = trimmed.match(/^e2e\s+delete\s+(\S+)$/i);
+  if (deleteMatch) {
+    return { type: "e2e_delete", testId: deleteMatch[1] };
+  }
+
+  // Schedule commands
+  if (lower === "e2e schedules") {
+    return { type: "e2e_schedules" };
+  }
+
+  const scheduleMatch = trimmed.match(/^e2e\s+schedule\s+(\S+)\s+(.+)$/i);
+  if (scheduleMatch) {
+    return { type: "e2e_schedule", testId: scheduleMatch[1], cronSchedule: scheduleMatch[2] };
+  }
+
+  const pauseMatch = trimmed.match(/^e2e\s+schedule:pause\s+(\S+)$/i);
+  if (pauseMatch) {
+    return { type: "e2e_schedule_pause", jobId: pauseMatch[1] };
+  }
+
+  const resumeMatch = trimmed.match(/^e2e\s+schedule:resume\s+(\S+)$/i);
+  if (resumeMatch) {
+    return { type: "e2e_schedule_resume", jobId: resumeMatch[1] };
+  }
+
+  return null;
+}
+
+/**
  * Parse a regular agent command.
  * Strips an optional `@browserName` prefix used for targeting a specific browser.
  */
@@ -228,6 +305,18 @@ export function getHelpText(): string {
     "  conv:switch <id or index>     Switch to a different conversation",
     "  conv:rename <title>           Rename the current conversation",
     "  conv:archive                  Archive the current conversation",
+    "",
+    "E2E Testing:",
+    "  e2e list                      List all e2e tests",
+    "  e2e create \"name\" \"step1\"; \"step2\"  Create a new e2e test with steps",
+    "  e2e run <testId>              Run an e2e test",
+    "  e2e results <testId>          Show recent results for a test",
+    "  e2e delete <testId>           Delete a test",
+    "  e2e schedule <testId> <cron>  Schedule a test on a cron schedule",
+    "  e2e schedules                 List all scheduled tests",
+    "  e2e schedule:pause <jobId>    Pause a scheduled job",
+    "  e2e schedule:resume <jobId>   Resume a scheduled job",
+    "  e2e-knowledge                 View e2e learnings statistics",
     "",
     "  help          Show this help text",
     "  cost          Show session cost summary",

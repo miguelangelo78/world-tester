@@ -1,12 +1,15 @@
 import readline from "readline";
 import { stdin as input, stdout as output } from "process";
 import { getCurrentUrl, getDomain } from "./browser/stagehand.js";
-import { parseCommand, parseBrowserCommand, parseConversationCommand, getHelpText } from "./cli/parser.js";
+import { parseCommand, parseBrowserCommand, parseConversationCommand, parseE2ECommand, getHelpText } from "./cli/parser.js";
 import * as display from "./cli/display.js";
 import { createCliSink } from "./cli-sink.js";
 import { createAgentCore } from "./core.js";
 import { loadConversationContext } from "./agent/chat.js";
 import { isAbortError } from "./abort.js";
+import { PrismaClient } from "@prisma/client";
+import { executeE2ETest, saveTestRun } from "./e2e/runner.js";
+import { getE2ELearningsStats } from "./e2e/learnings.js";
 
 function question(rl: readline.Interface, promptText: string): Promise<string> {
   return new Promise((resolve) => {
@@ -199,6 +202,185 @@ async function main() {
       continue;
     }
 
+    // ── E2E Test commands ──
+    const e2eCmd = parseE2ECommand(trimmed);
+    if (e2eCmd) {
+      const prisma = new PrismaClient();
+      try {
+        switch (e2eCmd.type) {
+          case "e2e_list": {
+            const tests = await prisma.e2ETest.findMany({ where: { isActive: true } });
+            if (tests.length === 0) {
+              display.info("No e2e tests found. Create one with: e2e create \"name\" \"step1\"; \"step2\"");
+            } else {
+              display.info(`E2E Tests (${tests.length}):`);
+              for (const t of tests) {
+                const stepCount = Array.isArray((t.definition as any)?.steps) ? ((t.definition as any).steps as string[]).length : 0;
+                console.log(`  [${t.id.slice(0, 8)}] ${t.name} (${stepCount} steps)`);
+              }
+            }
+            break;
+          }
+          case "e2e_create": {
+            const test = await prisma.e2ETest.create({
+              data: {
+                name: e2eCmd.name,
+                definition: { steps: e2eCmd.steps },
+                isActive: true,
+              },
+            });
+            display.success(`Created test: ${test.name} (${e2eCmd.steps.length} steps) [${test.id.slice(0, 8)}]`);
+            break;
+          }
+          case "e2e_run": {
+            const test = await prisma.e2ETest.findUnique({ where: { id: e2eCmd.testId } });
+            if (!test) {
+              display.error(`Test not found: ${e2eCmd.testId}`);
+              break;
+            }
+
+            display.info(`Running: ${test.name}...`);
+            const run = await prisma.e2ETestRun.create({ data: { testId: test.id } });
+
+            try {
+              const stagehand = pool.active().stagehand;
+              const result = await executeE2ETest(
+                test.definition,
+                stagehand,
+                config,
+                memory,
+                costTracker,
+                prisma,
+                run.id,
+                test.id, // Pass testId
+                sink,
+              );
+
+              const domain = new URL(stagehand.context.pages()[0].url()).hostname;
+              await saveTestRun(prisma, memory, result, test.name, domain);
+
+              display.success(`Test complete: ${result.status.toUpperCase()}`);
+              display.info(`Steps: ${result.steps.filter((s) => s.status === "passed").length}/${result.steps.length} passed`);
+              display.info(`Duration: ${(result.durationMs / 1000).toFixed(1)}s | Cost: $${result.costUsd.toFixed(4)}`);
+            } catch (err) {
+              display.error(`Test failed: ${err instanceof Error ? err.message : String(err)}`);
+              await prisma.e2ETestRun.update({
+                where: { id: run.id },
+                data: { status: "failed", errorMessage: err instanceof Error ? err.message : String(err), completedAt: new Date() },
+              });
+            }
+            break;
+          }
+          case "e2e_results": {
+            const runs = await prisma.e2ETestRun.findMany({
+              where: { testId: e2eCmd.testId },
+              take: 5,
+              orderBy: { startedAt: "desc" },
+            });
+
+            if (runs.length === 0) {
+              display.info("No runs found for this test");
+            } else {
+              display.info(`Recent runs for test ${e2eCmd.testId.slice(0, 8)}:`);
+              for (const run of runs) {
+                const dateStr = run.startedAt.toLocaleDateString();
+                const statusStr = run.status.toUpperCase();
+                const durationStr = run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : "—";
+                console.log(`  [${statusStr}] ${dateStr} (${durationStr})`);
+              }
+            }
+            break;
+          }
+          case "e2e_delete": {
+            const test = await prisma.e2ETest.findUnique({ where: { id: e2eCmd.testId } });
+            if (!test) {
+              display.error(`Test not found: ${e2eCmd.testId}`);
+              break;
+            }
+
+            await prisma.e2ETest.update({
+              where: { id: e2eCmd.testId },
+              data: { isActive: false },
+            });
+            display.success(`Deleted test: ${test.name}`);
+            break;
+          }
+          case "e2e_schedules": {
+            const jobs = await prisma.e2EScheduledJob.findMany({
+              include: { test: true },
+              orderBy: { nextRunAt: "asc" },
+            });
+
+            if (jobs.length === 0) {
+              display.info("No scheduled tests. Create one with: e2e schedule <testId> <cron>");
+            } else {
+              display.info(`Scheduled Tests (${jobs.length}):`);
+              for (const job of jobs) {
+                const status = job.enabled ? "ON" : "OFF";
+                const nextRun = job.nextRunAt ? new Date(job.nextRunAt).toLocaleString() : "—";
+                console.log(`  [${status}] ${job.test.name} | ${job.cronSchedule} | Next: ${nextRun}`);
+              }
+            }
+            break;
+          }
+          case "e2e_schedule": {
+            const test = await prisma.e2ETest.findUnique({ where: { id: e2eCmd.testId } });
+            if (!test) {
+              display.error(`Test not found: ${e2eCmd.testId}`);
+              break;
+            }
+
+            const job = await prisma.e2EScheduledJob.create({
+              data: {
+                testId: e2eCmd.testId,
+                cronSchedule: e2eCmd.cronSchedule,
+                enabled: true,
+              },
+              include: { test: true },
+            });
+
+            display.success(`Scheduled test: ${job.test.name}`);
+            display.info(`Cron: ${job.cronSchedule}`);
+            display.info(`Job ID: ${job.id.slice(0, 8)}`);
+            break;
+          }
+          case "e2e_schedule_pause": {
+            const job = await prisma.e2EScheduledJob.findUnique({ where: { id: e2eCmd.jobId }, include: { test: true } });
+            if (!job) {
+              display.error(`Job not found: ${e2eCmd.jobId}`);
+              break;
+            }
+
+            await prisma.e2EScheduledJob.update({
+              where: { id: e2eCmd.jobId },
+              data: { enabled: false },
+            });
+            display.success(`Paused: ${job.test.name}`);
+            break;
+          }
+          case "e2e_schedule_resume": {
+            const job = await prisma.e2EScheduledJob.findUnique({ where: { id: e2eCmd.jobId }, include: { test: true } });
+            if (!job) {
+              display.error(`Job not found: ${e2eCmd.jobId}`);
+              break;
+            }
+
+            await prisma.e2EScheduledJob.update({
+              where: { id: e2eCmd.jobId },
+              data: { enabled: true },
+            });
+            display.success(`Resumed: ${job.test.name}`);
+            break;
+          }
+        }
+      } catch (err) {
+        display.error(err instanceof Error ? err.message : String(err));
+      } finally {
+        await prisma.$disconnect();
+      }
+      continue;
+    }
+
     // ── Standard commands ──
     switch (trimmed.toLowerCase()) {
       case "quit":
@@ -293,6 +475,28 @@ async function main() {
               }
             }
           }
+        }
+        break;
+      }
+
+      case "e2e-knowledge": {
+        const prisma = new PrismaClient();
+        try {
+          const stats = await getE2ELearningsStats(prisma);
+          display.info(`E2E Test Learnings (${stats.total} total):`);
+          console.log(`  Avg Confidence: ${(stats.avgConfidence * 100).toFixed(1)}%`);
+          console.log(`  By Category:`);
+          for (const [cat, count] of Object.entries(stats.byCategory)) {
+            if (count > 0) console.log(`    ${cat}: ${count}`);
+          }
+          if (Object.keys(stats.byTestId).length > 0) {
+            console.log(`  By Test:`);
+            for (const [testName, count] of Object.entries(stats.byTestId)) {
+              console.log(`    ${testName}: ${count}`);
+            }
+          }
+        } finally {
+          await prisma.$disconnect();
         }
         break;
       }
