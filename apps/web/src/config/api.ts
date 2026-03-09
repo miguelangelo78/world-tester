@@ -1,12 +1,19 @@
 /**
  * Get the API base URL dynamically
- * In production (browser), uses relative URLs to the same origin
- * In development, can be configured via environment
+ * Supports three scenarios:
+ * 1. Browser side with same-origin API: use relative URLs
+ * 2. Browser side with different-origin API: use NEXT_PUBLIC_API_URL env var
+ * 3. Server-side (SSR): use environment configuration
  */
 export function getApiBaseUrl(): string {
-  // Browser-side: always use relative URLs to current origin
+  // Browser-side: check for explicit API URL config
   if (typeof window !== "undefined") {
-    return ""; // Empty string means relative URLs (e.g., "/api/e2e/...")
+    // Allow NEXT_PUBLIC_API_URL to override default behavior
+    if (process.env.NEXT_PUBLIC_API_URL) {
+      return process.env.NEXT_PUBLIC_API_URL;
+    }
+    // Default to same origin (relative URLs)
+    return "";
   }
   
   // Server-side (SSR/Next.js): use environment variable or localhost
@@ -19,9 +26,10 @@ export function getApiBaseUrl(): string {
 export function getApiUrl(path: string): string {
   const base = getApiBaseUrl();
   if (!base) {
-    // Browser side - use relative URL
+    // Browser side with same origin - use relative URL
     return path.startsWith("/") ? path : `/${path}`;
   }
-  // Server side - use full URL
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  // Use configured API base URL
+  const cleanBase = base.endsWith("/") ? base.slice(0, -1) : base;
+  return `${cleanBase}${path.startsWith("/") ? path : `/${path}`}`;
 }
