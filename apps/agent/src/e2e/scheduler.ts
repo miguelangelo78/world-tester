@@ -52,15 +52,15 @@ export class E2EScheduler {
     // Load all enabled scheduled jobs
     const jobs = await this.prisma.e2EScheduledJob.findMany({
       where: { enabled: true },
-      include: { test: true },
+      include: { E2ETest: true },
     });
 
     for (const job of jobs) {
       try {
         this.scheduleTest(job);
-        this.sink?.info(`Scheduled: ${job.test.name} (${job.cronSchedule})`);
+        this.sink?.info(`Scheduled: ${job.E2ETest.name} (${job.cronSchedule})`);
       } catch (err) {
-        this.sink?.warn(`Failed to schedule ${job.test.name}: ${err}`);
+        this.sink?.warn(`Failed to schedule ${job.E2ETest.name}: ${err}`);
       }
     }
 
@@ -119,12 +119,12 @@ export class E2EScheduler {
   private async executeScheduledTest(job: any): Promise<void> {
     // Check if we're at max concurrent tests
     if (this.activeRuns.size >= this.config.maxConcurrentTests) {
-      this.sink?.warn(`Max concurrent tests (${this.config.maxConcurrentTests}) reached, skipping ${job.test.name}`);
+      this.sink?.warn(`Max concurrent tests (${this.config.maxConcurrentTests}) reached, skipping ${job.E2ETest.name}`);
       return;
     }
 
     try {
-      this.sink?.info(`[SCHEDULED] Starting: ${job.test.name} (${job.cronSchedule})`);
+      this.sink?.info(`[SCHEDULED] Starting: ${job.E2ETest.name} (${job.cronSchedule})`);
 
       // Create test run
       const run = await this.prisma.e2ETestRun.create({
@@ -156,7 +156,7 @@ export class E2EScheduler {
         },
       });
     } catch (err) {
-      this.sink?.warn(`Error executing scheduled test ${job.test.name}: ${err}`);
+      this.sink?.warn(`Error executing scheduled test ${job.E2ETest.name}: ${err}`);
     }
   }
 
@@ -168,7 +168,7 @@ export class E2EScheduler {
     let result: any = null;
 
     try {
-      const test = job.test;
+      const test = job.E2ETest;
       const stagehand = this.core.pool.active().stagehand;
 
       result = await executeE2ETest(
@@ -202,7 +202,7 @@ export class E2EScheduler {
         },
       });
 
-      this.sink?.info(`[SCHEDULED] Completed: ${job.test.name} — ${result.status.toUpperCase()}`);
+      this.sink?.info(`[SCHEDULED] Completed: ${job.E2ETest.name} — ${result.status.toUpperCase()}`);
 
       // Send notification
       if (result.status === "failed") {
@@ -210,7 +210,7 @@ export class E2EScheduler {
       }
     } catch (err) {
       const durationMs = Date.now() - startTime;
-      this.sink?.warn(`[SCHEDULED] Failed: ${job.test.name} — ${err}`);
+      this.sink?.warn(`[SCHEDULED] Failed: ${job.E2ETest.name} — ${err}`);
 
       // Update run with error
       await this.prisma.e2ETestRun.update({
@@ -246,7 +246,7 @@ export class E2EScheduler {
 
       await this.notificationDispatcher.notifyTestResult(
         job.testId,
-        job.test.name,
+        job.E2ETest.name,
         result.status === "passed" ? "passed" : "failed",
         notification,
         {
@@ -260,7 +260,7 @@ export class E2EScheduler {
         },
       );
     } catch (err) {
-      this.sink?.warn(`Failed to send notification for ${job.test.name}: ${err}`);
+      this.sink?.warn(`Failed to send notification for ${job.E2ETest.name}: ${err}`);
     }
   }
 
