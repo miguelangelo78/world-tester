@@ -398,7 +398,7 @@ export class Orchestrator {
             { instruction: handoffInstruction, domain },
             this.config.generativeAiApiKey
           );
-          const result = await createE2ETestViaAPI(e2eTest, this.config.apiUrl || "http://localhost:3100");
+          const result = await createE2ETestViaAPI(e2eTest);
           browserResult = {
             success: true,
             message: result.message,

@@ -113,10 +113,12 @@ Example output:
  */
 export async function createE2ETestViaAPI(
   test: E2ETest,
-  apiUrl: string
+  apiUrl?: string
 ): Promise<{ id: string; name: string; message: string }> {
   try {
-    const response = await fetch(`${apiUrl}/api/e2e/tests`, {
+    // Use relative URL by default (same service), or fall back to provided URL
+    const url = apiUrl ? `${apiUrl}/api/e2e/tests` : "/api/e2e/tests";
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(test),
