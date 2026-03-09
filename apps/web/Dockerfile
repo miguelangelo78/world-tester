@@ -20,6 +20,10 @@ RUN npm install -w @world-tester/web -w @world-tester/shared
 # Copy web source
 COPY apps/web/ apps/web/
 
+# Build arguments for API configuration
+ARG NEXT_PUBLIC_API_URL=http://localhost:3100
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 # Build Next.js
 RUN cd apps/web && npx next build
 
