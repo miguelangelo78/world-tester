@@ -17,7 +17,7 @@ export default function ResultsPage({ params }: ResultsPageProps) {
 
   const handleRerun = async (testId: string) => {
     try {
-      const response = await fetch(`http://localhost:3100/api/e2e/tests/${testId}/run`, {
+      const response = await fetch(`/api/e2e/tests/${testId}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });

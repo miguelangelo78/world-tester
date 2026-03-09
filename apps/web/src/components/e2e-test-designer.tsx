@@ -92,7 +92,7 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
     if (testId) {
       const fetchTest = async () => {
         try {
-          const response = await fetch(`http://localhost:3100/api/e2e/tests/${testId}`);
+          const response = await fetch(`/api/e2e/tests/${testId}`);
           if (!response.ok) throw new Error("Failed to fetch test");
           const data = await response.json();
           console.log("[E2E Designer] API Response:", data);

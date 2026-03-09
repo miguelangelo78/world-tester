@@ -49,8 +49,8 @@ export const E2EDashboard: React.FC<E2EDashboardProps> = ({
       try {
         // Fetch tests, optionally filtered by selected domain
         const testsUrl = selectedDomain 
-          ? `http://localhost:3100/api/e2e/tests?domain=${encodeURIComponent(selectedDomain)}`
-          : "http://localhost:3100/api/e2e/tests";
+          ? `/api/e2e/tests?domain=${encodeURIComponent(selectedDomain)}`
+          : "/api/e2e/tests";
         
         const response = await fetch(testsUrl);
         if (!response.ok) throw new Error("Failed to fetch tests");
@@ -100,7 +100,7 @@ export const E2EDashboard: React.FC<E2EDashboardProps> = ({
     // Fetch available domains (only on initial load or when no domain is selected)
     const fetchDomains = async () => {
       try {
-        const response = await fetch("http://localhost:3100/api/e2e/domains");
+        const response = await fetch("/api/e2e/domains");
         if (!response.ok) throw new Error("Failed to fetch domains");
         const data = await response.json();
         const domains = Array.isArray(data.domains) ? data.domains.filter((d: any) => d) : [];

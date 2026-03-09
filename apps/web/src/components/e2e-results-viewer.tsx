@@ -68,7 +68,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
 
   const fetchPredefinedSteps = async () => {
     try {
-      const response = await fetch(`http://localhost:3100/api/e2e/tests/${testId}`);
+      const response = await fetch(`/api/e2e/tests/${testId}`);
       if (!response.ok) return;
       const data = await response.json();
       setPredefinedSteps(
@@ -83,7 +83,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
     try {
       // Fetch all runs for the test
       const response = await fetch(
-        `http://localhost:3100/api/e2e/tests/${testId}/results?limit=50`
+        `/api/e2e/tests/${testId}/results?limit=50`
       );
       if (!response.ok) {
         if (response.status === 404) {
@@ -213,7 +213,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
   const handleExport = async (format: "json" | "pdf" | "html") => {
     try {
       const response = await fetch(
-        `http://localhost:3100/api/e2e/tests/${testId}/export?format=${format}`
+        `/api/e2e/tests/${testId}/export?format=${format}`
       );
       if (!response.ok) throw new Error("Export failed");
 
@@ -639,7 +639,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
                               <p className="text-xs text-muted-foreground mb-2 font-medium">Before</p>
                               <div className="border border-border rounded bg-muted overflow-hidden">
                                 <img
-                                  src={run ? `http://localhost:3100/api/e2e/steps/${run.id}/${executedStep.stepNumber}/screenshot?type=before` : "#"}
+                                  src={run ? `/api/e2e/steps/${run.id}/${executedStep.stepNumber}/screenshot?type=before` : "#"}
                                   alt={`Step ${stepNum} - Before`}
                                   className="max-w-full h-auto"
                                   onError={(e) => {
@@ -655,7 +655,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
                               <p className="text-xs text-muted-foreground mb-2 font-medium">After</p>
                               <div className="border border-border rounded bg-muted overflow-hidden">
                                 <img
-                                  src={run ? `http://localhost:3100/api/e2e/steps/${run.id}/${executedStep.stepNumber}/screenshot?type=after` : "#"}
+                                  src={run ? `/api/e2e/steps/${run.id}/${executedStep.stepNumber}/screenshot?type=after` : "#"}
                                   alt={`Step ${stepNum} - After`}
                                   className="max-w-full h-auto"
                                   onError={(e) => {

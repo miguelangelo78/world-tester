@@ -45,7 +45,7 @@ export default function E2EPage() {
 
   const handleRunTest = async (testId: string) => {
     try {
-      const response = await fetch(`http://localhost:3100/api/e2e/tests/${testId}/run`, {
+      const response = await fetch(`/api/e2e/tests/${testId}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
@@ -84,8 +84,8 @@ export default function E2EPage() {
   const handleSaveTest = async (test: TestDefinition) => {
     try {
       const url = currentState.testId
-        ? `http://localhost:3100/api/e2e/tests/${currentState.testId}`
-        : `http://localhost:3100/api/e2e/tests`;
+        ? `/api/e2e/tests/${currentState.testId}`
+        : `/api/e2e/tests`;
 
       const method = currentState.testId ? "PUT" : "POST";
 
