@@ -177,6 +177,7 @@ export class CostTracker {
 
   private async saveLedger(): Promise<void> {
     if (!this.ledger) return;
+    const now = new Date();
     await prisma.billingLedger.upsert({
       where: { id: "singleton" },
       update: {
@@ -186,6 +187,7 @@ export class CostTracker {
         totalInputTokens: this.ledger.totalInputTokens,
         totalOutputTokens: this.ledger.totalOutputTokens,
         sessionCount: this.ledger.sessionCount,
+        lastUpdated: now,
       },
       create: {
         id: "singleton",
@@ -195,6 +197,7 @@ export class CostTracker {
         totalInputTokens: this.ledger.totalInputTokens,
         totalOutputTokens: this.ledger.totalOutputTokens,
         sessionCount: this.ledger.sessionCount,
+        lastUpdated: now,
       },
     });
   }
