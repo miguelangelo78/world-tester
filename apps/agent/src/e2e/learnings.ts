@@ -15,6 +15,12 @@ export async function tagE2ELearnings(
   runResult: E2ERunResult,
   domain: string,
 ): Promise<void> {
+  // Validate domain - skip if it's an invalid/internal domain
+  if (!domain || domain === "unknown" || domain.startsWith("chrome") || domain === "chromewebdata") {
+    console.warn(`[E2E Learnings] Skipping learning tagging for invalid domain: ${domain}`);
+    return;
+  }
+
   // Only tag learnings from successful test runs
   if (runResult.status !== "passed") {
     return;
@@ -115,6 +121,74 @@ export async function tagE2ELearnings(
   }
 
   console.log(`Tagged ${learnings.length} learnings from e2e test run ${runResult.runId}`);
+}
+
+/**
+ * Get all learnings for a domain (both E2E and general learnings)
+ * These are used to improve test generation and execution
+ */
+export async function getDomainLearnings(
+  prisma: PrismaClient,
+  domain: string,
+): Promise<
+  Array<{
+    pattern: string;
+    category: string;
+    confidence: number;
+    source: "e2e" | "general";
+  }>
+> {
+  const learnings = await prisma.learning.findMany({
+    where: { domain },
+    orderBy: [{ confidence: "desc" }, { created: "desc" }],
+  });
+
+  return learnings.map((l) => ({
+    pattern: l.pattern,
+    category: l.category,
+    confidence: l.confidence,
+    source: l.sourceTaskId?.startsWith("e2e-") ? "e2e" : "general",
+  }));
+}
+
+/**
+ * Format learnings into a readable context string for AI
+ */
+export function formatLearningsContext(
+  learnings: Array<{
+    pattern: string;
+    category: string;
+    confidence: number;
+    source: "e2e" | "general";
+  }>
+): string {
+  if (learnings.length === 0) {
+    return "";
+  }
+
+  const byCategory: Record<string, typeof learnings> = {};
+  for (const learning of learnings) {
+    if (!byCategory[learning.category]) {
+      byCategory[learning.category] = [];
+    }
+    byCategory[learning.category].push(learning);
+  }
+
+  let context =
+    "## Known patterns for this domain (from past successful tests):\n\n";
+
+  for (const [category, items] of Object.entries(byCategory)) {
+    context += `### ${category.charAt(0).toUpperCase() + category.slice(1)}:\n`;
+    for (const item of items.slice(0, 5)) {
+      // Show top 5 per category
+      const icon = item.source === "e2e" ? "🤖" : "👤";
+      const confidence = Math.round(item.confidence * 100);
+      context += `- ${icon} ${item.pattern} (confidence: ${confidence}%)\n`;
+    }
+    context += "\n";
+  }
+
+  return context;
 }
 
 /**

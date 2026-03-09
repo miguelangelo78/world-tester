@@ -34,7 +34,7 @@ export type ConversationCommand =
   | { type: "conv_new"; title?: string }
   | { type: "conv_switch"; target: string }
   | { type: "conv_rename"; title: string }
-  | { type: "conv_archive" };
+  | { type: "conv_archive"; target?: string };
 
 export type E2ECommand =
   | { type: "e2e_list" }
@@ -147,8 +147,9 @@ export function parseConversationCommand(input: string): ConversationCommand | n
     return { type: "conv_rename", title: renameMatch[1].trim() };
   }
 
-  if (lower === "conv:archive" || lower === "conv archive") {
-    return { type: "conv_archive" };
+  const archiveMatch = trimmed.match(/^conv[:\s]archive(?:\s+(.+))?$/i);
+  if (archiveMatch) {
+    return { type: "conv_archive", target: archiveMatch[1]?.trim() };
   }
 
   return null;

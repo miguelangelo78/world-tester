@@ -213,9 +213,10 @@ export class BrowserPool {
     await browser.close();
     this.instances.delete(name);
 
+    // If despawning the active browser, clear the active ID
+    // Don't automatically switch to another browser - let the user choose
     if (this.activeId === name) {
-      const remaining = [...this.instances.keys()];
-      this.activeId = remaining[0] ?? "";
+      this.activeId = "";
     }
   }
 

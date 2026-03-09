@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createAgentCore, AgentCore } from "./core.js";
 import { isAbortError } from "./abort.js";
 import { createE2ERouter } from "./e2e/routes.js";
+import { createLearningsRouter } from "./learnings/routes.js";
 import { initializeScheduler } from "./e2e/scheduler.js";
 import { parseCommand, parseBrowserCommand, getHelpText } from "./cli/parser.js";
 import { getCurrentUrl, getDomain } from "./browser/stagehand.js";
@@ -87,6 +88,7 @@ function createWsSink(clients: Set<WebSocket>, commandId?: string, memory?: Memo
     },
     cost(line: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "info", message: line } satisfies LogPayload });
+      persist("info", line);
     },
     modeSwitch(from: string, to: string, instruction: string) {
       broadcast({ type: "log", id: commandId, payload: { level: "info", message: `[${from} -> ${to}] ${instruction}` } satisfies LogPayload });
@@ -278,8 +280,17 @@ async function handleCommand(
     return;
   }
 
-  if (lower === "knowledge") {
-    const domain = getDomain();
+  if (lower === "knowledge" || lower.startsWith("knowledge:")) {
+    // Extract domain from "knowledge:domain" format, or use current domain
+    let domain = getDomain();
+    if (lower.includes(":")) {
+      const parts = lower.split(":");
+      const providedDomain = parts.slice(1).join(":");
+      if (providedDomain.trim()) {
+        domain = providedDomain.trim();
+      }
+    }
+    
     const siteKnowledge = await core.memory.getSiteKnowledge(domain);
     const learnings = await core.memory.getLearnings(domain);
     const knowledgeSink = createWsSink(clients, commandId);
@@ -448,10 +459,10 @@ async function handleCommand(
     return;
   }
 
-  const convArchiveMatch = trimmed.match(/^conv(?:ersation)?[:\s]archive$/i);
+  const convArchiveMatch = trimmed.match(/^conv(?:ersation)?[:\s]archive(?:\s+(.+))?$/i);
   if (convArchiveMatch) {
-    const oldId = core.memory.activeConversationId;
-    await core.memory.archiveConversation(oldId);
+    const targetId = convArchiveMatch[1]?.trim() || core.memory.activeConversationId;
+    await core.memory.archiveConversation(targetId);
     const messages = await core.memory.getConversationMessages(core.memory.activeConversationId);
     const conversation = (await core.memory.getActiveConversation())!;
     const payload: ConversationSwitchedPayload = { conversation, messages };
@@ -514,7 +525,6 @@ async function handleCommand(
       commandSink.error(`Command failed: ${msg}`);
     }
   }
-  commandSink.flushStream();
   broadcast({ type: "stream_end", id: commandId, payload: {} });
   const durationMs = Date.now() - startTime;
 
@@ -612,6 +622,9 @@ async function main() {
 
   // E2E test routes
   app.use("/api/e2e", createE2ERouter(core, prisma));
+
+  // Learnings routes
+  app.use("/api/learnings", createLearningsRouter(prisma));
 
   const httpServer = http.createServer(app);
 

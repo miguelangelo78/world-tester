@@ -322,8 +322,28 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
             console.log(`[E2E] Test run completed: ${result.status}. Steps executed: ${result.steps.length}`);
           }
           
-          const pages = stagehand.context?.pages?.();
-          const domain = pages?.[0] ? new URL(pages[0].url()).hostname : "unknown";
+          // Use the test's configured domain, or extract from current page if available
+          let domain = test.domain;
+          
+          // If no domain in test config, try to extract from current page
+          if (!domain) {
+            try {
+              const pages = stagehand.context?.pages?.();
+              const url = pages?.[0]?.url();
+              if (url) {
+                const parsedUrl = new URL(url);
+                domain = parsedUrl.hostname || "unknown";
+              }
+            } catch (err) {
+              console.warn("[E2E] Failed to extract domain from page URL:", err);
+            }
+          }
+          
+          // Validate domain - filter out internal Chrome URLs
+          if (domain && (domain.startsWith("chrome") || domain === "chromewebdata" || domain === "unknown")) {
+            domain = test.domain || "unknown";
+          }
+          
           await saveTestRun(prisma, core.memory, result, test.name, domain);
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -557,17 +577,29 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
     }
   });
 
-  // Get all unique domains
+  // Get all unique domains (from both E2E tests and learnings)
   router.get("/domains", async (req: Request, res: Response) => {
     try {
+      // Get domains from E2E tests
       const tests = await prisma.e2ETest.findMany({
         select: { domain: true },
         distinct: ["domain"],
         orderBy: { domain: "asc" },
       });
 
-      const domains = tests.map(t => t.domain).filter(Boolean);
-      res.json({ domains });
+      // Get domains from learnings
+      const learnings = await prisma.learning.findMany({
+        select: { domain: true },
+        distinct: ["domain"],
+        orderBy: { domain: "asc" },
+      });
+
+      // Merge and deduplicate domains
+      const testDomains = tests.map(t => t.domain).filter(Boolean);
+      const learningDomains = learnings.map(l => l.domain).filter(Boolean);
+      const allDomains = Array.from(new Set([...testDomains, ...learningDomains])).sort();
+
+      res.json({ domains: allDomains });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -603,13 +635,25 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
   // Generate test steps using AI
   router.post("/generate-steps", async (req: Request, res: Response) => {
     try {
-      const { prompt } = req.body;
+      const { prompt, domain } = req.body;
 
       if (!prompt || typeof prompt !== "string") {
         return res.status(400).json({ error: "Prompt is required" });
       }
 
-      const steps = await generateE2ESteps(prompt);
+      // Fetch learnings for the domain if provided
+      let learningsContext = "";
+      if (domain) {
+        try {
+          const { getDomainLearnings, formatLearningsContext } = await import("./learnings.js");
+          const domainLearnings = await getDomainLearnings(prisma, domain);
+          learningsContext = formatLearningsContext(domainLearnings);
+        } catch (err) {
+          console.warn("[E2E] Failed to fetch learnings for domain:", domain, err);
+        }
+      }
+
+      const steps = await generateE2ESteps(prompt, domain, learningsContext);
       res.json({ steps });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

@@ -3,7 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { AppConfig } from "../config/types.js";
 import { MemoryManager } from "../memory/manager.js";
 import { CostTracker, UsageData } from "../cost/tracker.js";
-import { tagE2ELearnings } from "./learnings.js";
+import { tagE2ELearnings, getDomainLearnings, formatLearningsContext } from "./learnings.js";
 import { checkVisualRegression } from "./visual.js";
 import type { OutputSink } from "../output-sink.js";
 
@@ -53,6 +53,21 @@ export async function executeE2ETest(
   let totalUsage: UsageData = { input_tokens: 0, output_tokens: 0 };
   let failedSteps = 0;
   let testAbortReason: string | undefined;
+
+  // Fetch and log learnings for this domain
+  let learningsContext = "";
+  if (domain) {
+    try {
+      const domainLearnings = await getDomainLearnings(prisma, domain);
+      learningsContext = formatLearningsContext(domainLearnings);
+      if (learningsContext) {
+        sink?.info(`[Learnings] Found ${domainLearnings.length} patterns for domain ${domain}`);
+        sink?.info(learningsContext);
+      }
+    } catch (err) {
+      sink?.warn(`Failed to fetch learnings: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   // If domain is provided and first step isn't a navigation, navigate to domain first
   const firstStepIsNavigation = steps.length > 0 && 

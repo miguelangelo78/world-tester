@@ -1,5 +1,7 @@
 export async function generateE2ESteps(
-  prompt: string
+  prompt: string,
+  domain?: string,
+  learningsContext?: string
 ): Promise<Array<{ instruction: string }>> {
   if (!prompt.trim()) {
     throw new Error("Prompt is required");
@@ -25,6 +27,9 @@ export async function generateE2ESteps(
               parts: [
                 {
                   text: `You are an expert QA automation engineer. Generate clear, simple E2E test steps for a browser automation AI.
+
+${domain ? `Target Domain: ${domain}\n` : ""}
+${learningsContext ? `## Context from past successful tests on this domain:\n${learningsContext}\nUse these patterns to write instructions that match the known application structure.\n` : ""}
 
 Requirement: "${prompt}"
 

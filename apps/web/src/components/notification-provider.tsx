@@ -97,15 +97,15 @@ function NotificationItem({
   onDismiss: () => void;
 }) {
   const bgColor = {
-    success: "bg-green-500/20 border border-green-500/30",
-    error: "bg-red-500/20 border border-red-500/30",
-    info: "bg-blue-500/20 border border-blue-500/30",
+    success: "bg-green-500 border border-green-600",
+    error: "bg-red-500 border border-red-600",
+    info: "bg-blue-500 border border-blue-600",
   }[notification.type];
 
   const textColor = {
-    success: "text-green-400",
-    error: "text-red-400",
-    info: "text-blue-400",
+    success: "text-white",
+    error: "text-white",
+    info: "text-white",
   }[notification.type];
 
   const Icon = {
@@ -120,12 +120,12 @@ function NotificationItem({
       <div className="flex-1 min-w-0">
         <p className={`${textColor} font-semibold text-sm`}>{notification.title}</p>
         {notification.message && (
-          <p className="text-muted-foreground text-sm mt-1">{notification.message}</p>
+          <p className="text-white/90 text-sm mt-1">{notification.message}</p>
         )}
       </div>
       <button
         onClick={onDismiss}
-        className="text-muted-foreground hover:text-foreground shrink-0 mt-0.5"
+        className="text-white/70 hover:text-white shrink-0 mt-0.5 transition-colors"
       >
         <X className="h-4 w-4" />
       </button>

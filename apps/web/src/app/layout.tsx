@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 import { NotificationProvider } from "@/components/notification-provider";
+import { ConfirmationProvider } from "@/components/confirmation-dialog";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,9 +33,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans bg-background text-foreground`}
       >
-        <NotificationProvider>
-          <AppShell>{children}</AppShell>
-        </NotificationProvider>
+        <ConfirmationProvider>
+          <NotificationProvider>
+            <AppShell>{children}</AppShell>
+          </NotificationProvider>
+        </ConfirmationProvider>
       </body>
     </html>
   );

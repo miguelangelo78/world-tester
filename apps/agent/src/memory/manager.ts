@@ -23,6 +23,7 @@ export interface AddMessageInput {
 export class MemoryManager {
   private sessionId: string;
   private _activeConversationId = "";
+  private pendingMessages: ConversationMessageDTO[] = [];
 
   constructor(_dataDir: string) {
     this.sessionId = Date.now().toString(36);
@@ -77,6 +78,8 @@ export class MemoryManager {
       throw new Error(`Conversation "${id}" not found or archived`);
     }
     this._activeConversationId = id;
+    // Clear pending messages from previous conversation
+    this.pendingMessages = [];
     return this.getConversationMessages(id);
   }
 
@@ -106,7 +109,7 @@ export class MemoryManager {
       orderBy: { timestamp: "asc" },
       take: limit,
     });
-    return rows.map((r) => ({
+    const dbMessages = rows.map((r) => ({
       id: r.id,
       conversationId: r.conversationId,
       timestamp: r.timestamp.toISOString(),
@@ -117,6 +120,10 @@ export class MemoryManager {
       costUsd: r.costUsd ?? undefined,
       commandId: r.commandId ?? undefined,
     }));
+    
+    // Include pending messages that haven't been persisted yet
+    const pendingForConv = this.pendingMessages.filter(m => m.conversationId === id);
+    return [...dbMessages, ...pendingForConv];
   }
 
   async getActiveConversation(): Promise<ConversationInfo | null> {
@@ -134,6 +141,22 @@ export class MemoryManager {
   addConversationMessage(msg: AddMessageInput): void {
     if (!this._activeConversationId) return;
     const convId = this._activeConversationId;
+    
+    // Add to pending messages immediately (for instant replay)
+    const pendingMsg: ConversationMessageDTO = {
+      id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      conversationId: convId,
+      timestamp: new Date().toISOString(),
+      role: msg.role,
+      type: msg.type,
+      content: msg.content,
+      mode: msg.mode,
+      costUsd: msg.costUsd,
+      commandId: msg.commandId,
+    };
+    this.pendingMessages.push(pendingMsg);
+    
+    // Persist to database asynchronously
     prisma.conversationMessage
       .create({
         data: {
@@ -146,12 +169,14 @@ export class MemoryManager {
           commandId: msg.commandId ?? null,
         },
       })
-      .then(() =>
-        prisma.conversation.update({
+      .then((created) => {
+        // Remove from pending once confirmed in DB
+        this.pendingMessages = this.pendingMessages.filter(m => m.id !== pendingMsg.id);
+        return prisma.conversation.update({
           where: { id: convId },
           data: { updatedAt: new Date() },
-        }),
-      )
+        });
+      })
       .catch(() => {});
   }
 

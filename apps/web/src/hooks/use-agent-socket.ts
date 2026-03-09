@@ -147,8 +147,8 @@ export function useAgentSocket(): AgentSocket {
     sendCommand(`conv:rename ${title}`);
   }, [sendCommand]);
 
-  const archiveConversation = useCallback((_id: string) => {
-    sendCommand("conv:archive");
+  const archiveConversation = useCallback((id: string) => {
+    sendCommand(`conv:archive ${id}`);
   }, [sendCommand]);
 
   const refreshConversations = useCallback(() => {

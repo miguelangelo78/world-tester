@@ -1,6 +1,9 @@
+"use client";
+
 import React, { useState, useEffect } from "react";
 import { Play, Edit, Trash2, Clock, BarChart3, Search, Loader, Globe, X } from "lucide-react";
 import { getApiUrl } from "@/config/api";
+import { useConfirmation } from "./confirmation-dialog";
 
 interface TestMetrics {
   id: string;
@@ -38,6 +41,7 @@ export const E2EDashboard: React.FC<E2EDashboardProps> = ({
   onViewResults,
   isLoading = false,
 }) => {
+  const { confirm } = useConfirmation();
   const [tests, setTests] = useState<TestMetrics[]>([]);
   const [filteredTests, setFilteredTests] = useState<TestMetrics[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -152,7 +156,16 @@ export const E2EDashboard: React.FC<E2EDashboardProps> = ({
   };
 
   const handleDeleteTest = async (testId: string) => {
-    if (!confirm("Are you sure you want to delete this test?")) return;
+    const confirmed = await confirm({
+      title: "Delete Test?",
+      message: "Are you sure you want to delete this test? This cannot be undone.",
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      isDangerous: true,
+    });
+
+    if (!confirmed) return;
+
     try {
       await onDeleteTest(testId);
       setTests((prev) => prev.filter((t) => t.id !== testId));

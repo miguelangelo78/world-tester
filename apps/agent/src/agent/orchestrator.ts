@@ -192,12 +192,19 @@ export class Orchestrator {
       : undefined;
     const costSnapshot = this.costTracker.record(result.usage, resultModel);
 
-    const suppressMessage =
-      command.mode === "test" ||
-      ((command.mode === "chat" || command.mode === "auto") && result.streamed);
-    if (!suppressMessage) {
+    // Broadcast the final message only for non-streamed responses
+    // Streamed responses show content live via stream_chunk events, no need to broadcast again
+    if (command.mode !== "test" && !result.streamed) {
       sink.agentMessage(result.message);
     }
+    
+    // Always persist the final message for conversation history
+    this.memory.addConversationMessage({
+      role: "agent",
+      type: "agent",
+      content: result.message,
+      commandId: undefined,
+    });
     sink.cost(this.costTracker.formatCostLine(costSnapshot));
     sink.info(`Completed in ${(duration / 1000).toFixed(1)}s`);
     sink.separator();

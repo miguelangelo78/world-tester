@@ -413,6 +413,7 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
         <div className="mb-6 p-4 bg-muted/50 rounded-lg border border-border">
           <E2EStepGenerator
             prompt={test?.description || ""}
+            domain={test?.domain}
             onGeneratedSteps={handleGeneratedSteps}
             isLoading={loading}
           />

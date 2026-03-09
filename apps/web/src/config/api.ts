@@ -11,11 +11,6 @@ export function getApiBaseUrl(): string {
     return process.env.NEXT_PUBLIC_API_URL;
   }
   
-  // Browser side: use current origin (works for same-server deployments)
-  if (typeof window !== "undefined") {
-    return window.location.origin;
-  }
-  
   // Server-side (SSR): default to localhost:3100
   return "http://localhost:3100";
 }

@@ -152,6 +152,19 @@ export function CommandTerminal() {
           break;
         }
         case "stream_end": {
+          // Convert stream log to agent log so it persists correctly
+          if (streamBuf.current) {
+            setLogs((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.type === "stream") {
+                return [
+                  ...prev.slice(0, -1),
+                  { ...last, type: "agent" as const },
+                ];
+              }
+              return prev;
+            });
+          }
           streamBuf.current = "";
           break;
         }

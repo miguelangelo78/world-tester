@@ -6,12 +6,14 @@ import { getApiUrl } from "@/config/api";
 
 interface StepGeneratorProps {
   prompt: string;
+  domain?: string;
   onGeneratedSteps: (steps: Array<{ instruction: string }>) => void;
   isLoading?: boolean;
 }
 
 export const E2EStepGenerator: React.FC<StepGeneratorProps> = ({
   prompt,
+  domain,
   onGeneratedSteps,
   isLoading = false,
 }) => {
@@ -34,7 +36,7 @@ export const E2EStepGenerator: React.FC<StepGeneratorProps> = ({
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, ...(domain && { domain }) }),
       });
 
       if (!response.ok) throw new Error("Failed to generate steps");

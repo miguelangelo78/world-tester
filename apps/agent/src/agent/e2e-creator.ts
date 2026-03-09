@@ -1,4 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { PrismaClient } from "@prisma/client";
+import { getDomainLearnings, formatLearningsContext } from "../e2e/learnings.js";
 
 export interface E2ETestCreationRequest {
   instruction: string;
@@ -28,11 +30,25 @@ export interface E2ETest {
 export async function parseE2ETestFromConversation(
   request: E2ETestCreationRequest,
   apiKey: string,
+  prisma?: PrismaClient,
 ): Promise<E2ETest> {
   const client = new GoogleGenerativeAI(apiKey);
   const model = client.getGenerativeModel({ model: "gemini-2.5-flash" });
 
+  // Fetch learnings for this domain if available
+  let learningsContext = "";
+  if (prisma && request.domain) {
+    try {
+      const domainLearnings = await getDomainLearnings(prisma, request.domain);
+      learningsContext = formatLearningsContext(domainLearnings);
+    } catch (err) {
+      // Silently ignore if learnings can't be fetched
+    }
+  }
+
   const prompt = `You are a QA expert creating clear, executable E2E test steps.
+
+${learningsContext ? `## Known patterns for this domain:\n${learningsContext}\nUse these patterns in your test steps.\n` : ""}
 
 Test description: "${request.instruction}"
 Target domain: "${request.domain || "unknown"}"

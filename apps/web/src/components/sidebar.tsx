@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Terminal,
   History,
@@ -103,6 +103,7 @@ export function MobileMenuButton() {
 }
 
 function ConversationList({ collapsed }: { collapsed: boolean }) {
+  const router = useRouter();
   const {
     conversations, activeConversationId, status,
     switchConversation, createConversation, renameConversation, archiveConversation, refreshConversations,
@@ -125,9 +126,12 @@ function ConversationList({ collapsed }: { collapsed: boolean }) {
   };
 
   const handleSwitch = (id: string) => {
-    if (id === activeConversationId) return;
-    switchConversation(id);
-    setTimeout(refreshConversations, 500);
+    if (id !== activeConversationId) {
+      switchConversation(id);
+      setTimeout(refreshConversations, 500);
+    }
+    // Always navigate to dashboard, even if conversation is already active
+    router.push("/");
   };
 
   const startRename = (conv: ConversationInfo) => {
