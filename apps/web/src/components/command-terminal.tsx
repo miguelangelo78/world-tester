@@ -59,12 +59,20 @@ export function CommandTerminal() {
       step: "step",
       agent: "agent",
     };
-    const entries: LogEntry[] = messages.map((m) => ({
-      id: m.id,
-      type: typeMap[m.type] ?? "info",
-      text: m.type === "input" ? `> ${m.content}` : m.content,
-      timestamp: new Date(m.timestamp).getTime(),
-    }));
+    const entries: LogEntry[] = messages
+      .filter((m) => {
+        // Filter out system messages (internal instructions for the AI)
+        if (m.type === "agent" && m.content.startsWith("[System:")) {
+          return false;
+        }
+        return true;
+      })
+      .map((m) => ({
+        id: m.id,
+        type: typeMap[m.type] ?? "info",
+        text: m.type === "input" ? `> ${m.content}` : m.content,
+        timestamp: new Date(m.timestamp).getTime(),
+      }));
     setLogs(entries);
   }, []);
 

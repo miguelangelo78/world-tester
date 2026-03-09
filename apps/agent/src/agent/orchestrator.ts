@@ -475,11 +475,13 @@ export class Orchestrator {
 
     throwIfAborted(signal);
 
+    // Log the system instruction for transparency (internal only, not shown to user)
+    sink.info(`[System: you just executed a ${chatResult.action} action for the user. The instruction was: "${handoffInstruction}". Result (${status}): ${resultSummary}.`);
+
     const followUp = await raceAbort(runChat(
-      `[System: you just executed a ${chatResult.action} action for the user. ` +
-      `The instruction was: "${handoffInstruction}". ` +
+      `You just executed a ${chatResult.action} action. ` +
       `Result (${status}): ${resultSummary}. ` +
-      `Give a brief, friendly summary of what happened and ask if they need anything else.]`,
+      `Give a brief, friendly summary of what happened and ask if they need anything else.`,
       this.config,
       siteKnowledgeNow,
       learningsNow,
