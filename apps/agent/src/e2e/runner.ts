@@ -10,6 +10,11 @@ import { BrowserPool } from "../browser/pool.js";
 import type { OutputSink } from "../output-sink.js";
 import * as path from "path";
 import * as fs from "fs";
+import { fileURLToPath } from "url";
+
+// For ESM compatibility
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface E2EStepResult {
   stepNumber: number;
@@ -61,8 +66,9 @@ export async function executeE2ETest(
   let testAbortReason: string | undefined;
   
   // Ensure screenshots directory exists
-  // Use absolute path from project root to ensure screenshots are saved consistently
-  const screenshotsDir = path.resolve(process.cwd(), "..", "..", "data", "screenshots");
+  // Use absolute path from agent root to ensure screenshots are saved consistently
+  // __dirname is /home/santo/DEV/world-tester/apps/agent/src/e2e (or in docker: /app/apps/agent/src/e2e)
+  const screenshotsDir = path.resolve(__dirname, "..", "..", "..", "data", "screenshots");
   if (!fs.existsSync(screenshotsDir)) {
     fs.mkdirSync(screenshotsDir, { recursive: true });
   }
@@ -487,7 +493,26 @@ export async function executeE2ETest(
         failedSteps++;
         sink?.error(`Step ${stepNumber} failed: No result returned`);
       } else {
-        result.status = "passed";
+        // Check if the result message indicates the AI explicitly reported failure or inability
+        const resultMsg = typeof result.result === "string" ? result.result.toLowerCase() : "";
+        const failureIndicators = [
+          /cannot\s+(?:complete|do|perform|execute)/i,
+          /unable\s+to\s+(?:complete|do|perform|execute|log in|login)/i,
+          /i\s+(?:cannot|cannot|do not|don't)\s+(?:have|possess).*(?:credentials|password|username)/i,
+          /(?:failed|fail)\s+to\s+(?:complete|do|perform|execute|log in|login)/i,
+          /(?:do not|don't)\s+(?:have|possess)\s+(?:credentials|password|username)/i,
+        ];
+        
+        const indicatesFailure = failureIndicators.some(pattern => pattern.test(resultMsg));
+        
+        if (indicatesFailure) {
+          result.status = "failed";
+          result.error = `AI reported inability to complete task: ${result.result}`;
+          failedSteps++;
+          sink?.error(`Step ${stepNumber} failed: ${result.error}`);
+        } else {
+          result.status = "passed";
+        }
       }
     }
 

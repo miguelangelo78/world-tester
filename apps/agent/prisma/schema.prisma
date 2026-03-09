@@ -41,7 +41,7 @@ model ConversationMessage {
 }
 
 model E2ELearning {
-  id         String   @id
+  id         String   @id @default(cuid())
   learningId String
   testRunId  String
   testId     String

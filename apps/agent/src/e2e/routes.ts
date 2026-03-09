@@ -2,10 +2,16 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 import { AgentCore } from "../core.js";
 import { executeE2ETest, saveTestRun } from "./runner.js";
 import { TestResultExporter } from "./export.js";
 import { generateE2ESteps } from "./generate-steps.js";
+
+// For ESM compatibility
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Helper to extract single query param value
 function getQueryParam(value: any): string | undefined {
@@ -698,18 +704,23 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
         return res.status(404).json({ error: "Screenshot not found in database" });
       }
 
+      // Use __dirname from the router module location to get consistent path in Docker
+      const screenshotsDir = path.resolve(__dirname, "..", "..", "..", "data", "screenshots");
       let screenshotPath: string;
       
       // The stored path is the "after" screenshot
       // We need to construct paths for both before and after
+      // Extract filename from stored path (e.g., "/screenshots/e2e-runId-stepN.png" -> "e2e-runId-stepN.png")
+      const filename = path.basename(step.screenshot);
+      
       if (type === "before") {
-        // Convert "after" path to "before" path
-        // From: /tmp/e2e-{runId}-step{stepNumber}.png
-        // To: /tmp/e2e-{runId}-step{stepNumber}-before.png
-        screenshotPath = step.screenshot.replace(/\.png$/, "-before.png");
+        // Convert "after" filename to "before" filename
+        // From: e2e-{runId}-step{stepNumber}.png
+        // To: e2e-{runId}-step{stepNumber}-before.png
+        screenshotPath = path.join(screenshotsDir, filename.replace(/\.png$/, "-before.png"));
       } else {
-        // Use the stored path as-is (it's the "after" screenshot)
-        screenshotPath = step.screenshot;
+        // Use the filename for "after" screenshot
+        screenshotPath = path.join(screenshotsDir, filename);
       }
 
       // Read the screenshot file
