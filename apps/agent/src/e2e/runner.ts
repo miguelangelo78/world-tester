@@ -54,6 +54,29 @@ export async function executeE2ETest(
   let failedSteps = 0;
   let testAbortReason: string | undefined;
 
+  // If domain is provided and first step isn't a navigation, navigate to domain first
+  const firstStepIsNavigation = steps.length > 0 && 
+    (steps[0].toLowerCase().includes("navigate") || 
+     steps[0].toLowerCase().includes("go to") || 
+     steps[0].toLowerCase().includes("visit"));
+  
+  if (domain && !firstStepIsNavigation) {
+    // Add automatic navigation to domain as first step
+    const domainUrl = domain.startsWith("http://") || domain.startsWith("https://") 
+      ? domain 
+      : `https://${domain}`;
+    sink?.info(`[Initialization] Navigating to domain: ${domainUrl}`);
+    try {
+      const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
+      if (page) {
+        await page.goto(domainUrl, { waitUntil: "domcontentloaded" });
+        sink?.info(`[Initialization] Successfully navigated to ${domainUrl}`);
+      }
+    } catch (err) {
+      sink?.warn(`[Initialization] Failed to navigate to domain: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   for (let i = 0; i < steps.length; i++) {
     if (signal?.aborted) {
       testAbortReason = "Test was aborted by signal";
