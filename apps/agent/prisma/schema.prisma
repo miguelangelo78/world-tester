@@ -52,7 +52,7 @@ model E2ELearning {
 }
 
 model E2EScheduledJob {
-  id                 String       @id
+  id                 String       @id @default(cuid())
   testId             String       @unique
   cronSchedule       String
   notificationConfig Json?
@@ -101,7 +101,7 @@ model E2ETest {
 }
 
 model E2ETestRun {
-  id              String           @id
+  id              String           @id @default(cuid())
   testId          String
   isScheduled     Boolean          @default(false)
   scheduledJobId  String?
@@ -123,7 +123,7 @@ model E2ETestRun {
 }
 
 model E2ETestStep {
-  id           String     @id
+  id           String     @id @default(cuid())
   runId        String
   stepNumber   Int
   instruction  String
@@ -153,7 +153,7 @@ model E2ETestVersion {
 }
 
 model E2EVisualBaseline {
-  id             String    @id
+  id             String    @id @default(cuid())
   testId         String
   stepNumber     Int
   screenshotPath String
@@ -167,7 +167,7 @@ model E2EVisualBaseline {
 }
 
 model E2EVisualDiff {
-  id           String     @id
+  id           String     @id @default(cuid())
   runId        String
   stepNumber   Int
   baselinePath String

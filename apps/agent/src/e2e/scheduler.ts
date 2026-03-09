@@ -296,7 +296,7 @@ export class E2EScheduler {
   }> {
     const jobs = await this.prisma.e2EScheduledJob.findMany({
       where: { enabled: true },
-      include: { test: true },
+      include: { E2ETest: true },
     });
 
     return {
@@ -329,7 +329,7 @@ export class E2EScheduler {
   async resumeJob(jobId: string): Promise<void> {
     const job = await this.prisma.e2EScheduledJob.findUnique({
       where: { id: jobId },
-      include: { test: true },
+      include: { E2ETest: true },
     });
 
     if (!job) throw new Error("Job not found");

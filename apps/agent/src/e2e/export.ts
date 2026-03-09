@@ -58,8 +58,8 @@ export class TestResultExporter {
     const test = await this.prisma.e2ETest.findUnique({
       where: { id: testId },
       include: {
-        runs: {
-          include: { steps: true },
+        E2ETestRun: {
+          include: { E2ETestStep: true },
           orderBy: { startedAt: "desc" },
           take: limit,
         },
@@ -77,9 +77,9 @@ export class TestResultExporter {
               name: test.name,
               description: test.description,
             },
-            runs: test.runs,
-            totalRuns: test.runs.length,
-            passRate: this.calculatePassRate(test.runs),
+            runs: test.E2ETestRun,
+            totalRuns: test.E2ETestRun.length,
+            passRate: this.calculatePassRate(test.E2ETestRun),
           },
           null,
           2,
@@ -113,7 +113,7 @@ export class TestResultExporter {
           durationMs: run.durationMs,
           costUsd: run.costUsd,
         },
-        steps: run.steps.map((s: any) => ({
+        steps: run.E2ETestStep.map((s: any) => ({
           stepNumber: s.stepNumber,
           instruction: s.instruction,
           status: s.status,
@@ -123,7 +123,7 @@ export class TestResultExporter {
           retryCount: s.retryCount,
           screenshot: s.screenshot,
         })),
-        visualDiffs: run.visualDiffs?.map((d: any) => ({
+        visualDiffs: run.E2EVisualDiff?.map((d: any) => ({
           stepNumber: d.stepNumber,
           similarity: d.similarity,
           approved: d.approved,
@@ -167,7 +167,7 @@ export class TestResultExporter {
         doc.fontSize(12).font("Helvetica-Bold").text("Test Steps");
         doc.fontSize(10).font("Helvetica");
 
-        for (const step of run.steps) {
+        for (const step of run.E2ETestStep) {
           const statusSymbol = step.status === "passed" ? "✓" : "✗";
           doc.text(`${statusSymbol} Step ${step.stepNumber}: ${step.instruction}`);
           if (step.result) {
@@ -183,11 +183,11 @@ export class TestResultExporter {
         doc.moveDown();
 
         // Visual Regression
-        if (run.visualDiffs && run.visualDiffs.length > 0) {
+        if (run.E2EVisualDiff && run.E2EVisualDiff.length > 0) {
           doc.fontSize(12).font("Helvetica-Bold").text("Visual Regression Results");
           doc.fontSize(10).font("Helvetica");
 
-          for (const diff of run.visualDiffs) {
+          for (const diff of run.E2EVisualDiff) {
             const status = diff.approved ? "Approved" : "Pending";
             doc.text(
               `Step ${diff.stepNumber}: ${(diff.similarity * 100).toFixed(1)}% similarity (${status})`,
@@ -206,8 +206,8 @@ export class TestResultExporter {
    * Export as HTML
    */
   private exportHTML(run: any, options: ExportOptions): string {
-    const passedSteps = run.steps.filter((s: any) => s.status === "passed").length;
-    const totalSteps = run.steps.length;
+    const passedSteps = run.E2ETestStep.filter((s: any) => s.status === "passed").length;
+    const totalSteps = run.E2ETestStep.length;
     const passRate = ((passedSteps / totalSteps) * 100).toFixed(1);
 
     return `
@@ -309,7 +309,7 @@ export class TestResultExporter {
     </div>
 
     ${
-      run.visualDiffs && run.visualDiffs.length > 0
+      run.E2EVisualDiff && run.E2EVisualDiff.length > 0
         ? `
     <div class="section">
       <h2>Visual Regression</h2>
@@ -319,7 +319,7 @@ export class TestResultExporter {
           <th>Similarity</th>
           <th>Status</th>
         </tr>
-        ${run.visualDiffs
+        ${run.E2EVisualDiff
           .map(
             (diff: any) => `
           <tr>

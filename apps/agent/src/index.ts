@@ -321,7 +321,7 @@ async function main() {
           }
           case "e2e_schedules": {
             const jobs = await prisma.e2EScheduledJob.findMany({
-              include: { test: true },
+              include: { E2ETest: true },
               orderBy: { nextRunAt: "asc" },
             });
 
@@ -350,16 +350,16 @@ async function main() {
                 cronSchedule: e2eCmd.cronSchedule,
                 enabled: true,
               },
-              include: { test: true },
+              include: { E2ETest: true },
             });
 
-            display.success(`Scheduled test: ${job.test.name}`);
+            display.success(`Scheduled test: ${job.E2ETest.name}`);
             display.info(`Cron: ${job.cronSchedule}`);
             display.info(`Job ID: ${job.id.slice(0, 8)}`);
             break;
           }
           case "e2e_schedule_pause": {
-            const job = await prisma.e2EScheduledJob.findUnique({ where: { id: e2eCmd.jobId }, include: { test: true } });
+            const job = await prisma.e2EScheduledJob.findUnique({ where: { id: e2eCmd.jobId }, include: { E2ETest: true } });
             if (!job) {
               display.error(`Job not found: ${e2eCmd.jobId}`);
               break;
@@ -369,11 +369,11 @@ async function main() {
               where: { id: e2eCmd.jobId },
               data: { enabled: false },
             });
-            display.success(`Paused: ${job.test.name}`);
+            display.success(`Paused: ${job.E2ETest.name}`);
             break;
           }
           case "e2e_schedule_resume": {
-            const job = await prisma.e2EScheduledJob.findUnique({ where: { id: e2eCmd.jobId }, include: { test: true } });
+            const job = await prisma.e2EScheduledJob.findUnique({ where: { id: e2eCmd.jobId }, include: { E2ETest: true } });
             if (!job) {
               display.error(`Job not found: ${e2eCmd.jobId}`);
               break;

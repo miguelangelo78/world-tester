@@ -90,8 +90,8 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
       const tests = await prisma.e2ETest.findMany({
         where: Object.keys(where).length > 0 ? where : undefined,
         include: { 
-          _count: { select: { runs: true } },
-          runs: {
+          _count: { select: { E2ETestRun: true } },
+          E2ETestRun: {
             take: 1,
             orderBy: { startedAt: "desc" },
           },
@@ -127,15 +127,15 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
           ...test,
           steps: (test.definition as any)?.steps || [],
           passRate,
-          totalRuns: test._count.runs,
+          totalRuns: test._count.E2ETestRun,
           averageCost: avgCost,
           totalCost: totalCost,
           averageDuration: avgDuration,
-          lastRun: test.runs[0] ? {
-            status: test.runs[0].status as "passed" | "failed" | "running",
-            date: new Date(test.runs[0].startedAt).toLocaleString(),
-            durationMs: test.runs[0].durationMs || 0,
-            cost: test.runs[0].costUsd,
+          lastRun: test.E2ETestRun[0] ? {
+            status: test.E2ETestRun[0].status as "passed" | "failed" | "running",
+            date: new Date(test.E2ETestRun[0].startedAt).toLocaleString(),
+            durationMs: test.E2ETestRun[0].durationMs || 0,
+            cost: test.E2ETestRun[0].costUsd,
           } : undefined,
         };
       }));
@@ -153,19 +153,23 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
       const test = await prisma.e2ETest.findUnique({
         where: { id },
         include: {
-          runs: {
+          E2ETestRun: {
             take: 10,
             orderBy: { startedAt: "desc" },
-            include: { steps: true },
+            include: { E2ETestStep: true },
           },
         },
       });
 
       if (!test) return res.status(404).json({ error: "Test not found" });
       
-      // Ensure the response includes steps from the definition
+      // Transform E2ETestRun and E2ETestStep fields for frontend compatibility
       const enrichedTest = {
         ...test,
+        runs: test.E2ETestRun.map((run) => ({
+          ...run,
+          steps: run.E2ETestStep,
+        })),
         steps: (test.definition as any)?.steps || [],
       };
       
@@ -391,11 +395,16 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
       const runId = String(req.params.runId);
       const run = await prisma.e2ETestRun.findUnique({
         where: { id: runId },
-        include: { steps: true, visualDiffs: true },
+        include: { E2ETestStep: true, E2EVisualDiff: true },
       });
 
       if (!run) return res.status(404).json({ error: "Run not found" });
-      res.json(run);
+      // Rename fields for frontend compatibility
+      res.json({
+        ...run,
+        steps: run.E2ETestStep,
+        visualDiffs: run.E2EVisualDiff,
+      });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -416,14 +425,16 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
         take: limit,
         orderBy: { startedAt: "desc" },
         include: { 
-          steps: true,
-          visualDiffs: true,
+          E2ETestStep: true,
+          E2EVisualDiff: true,
         },
       });
 
-      // Enrich runs with test info
+      // Enrich runs with test info and rename fields for frontend compatibility
       const enrichedRuns = runs.map((run) => ({
         ...run,
+        steps: run.E2ETestStep,
+        visualDiffs: run.E2EVisualDiff,
         test: {
           name: test.name,
           description: test.description,
@@ -469,7 +480,7 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
           notificationConfig: notificationConfig || {},
           enabled: true,
         },
-        include: { test: true },
+        include: { E2ETest: true },
       });
 
       res.status(201).json(schedule);
@@ -482,7 +493,7 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
   router.get("/schedules", async (req: Request, res: Response) => {
     try {
       const schedules = await prisma.e2EScheduledJob.findMany({
-        include: { test: true },
+        include: { E2ETest: true },
         orderBy: { nextRunAt: "asc" },
       });
 
@@ -498,7 +509,7 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
       const jobId = String(req.params.jobId);
       const schedule = await prisma.e2EScheduledJob.findUnique({
         where: { id: jobId },
-        include: { test: true },
+        include: { E2ETest: true },
       });
 
       if (!schedule) return res.status(404).json({ error: "Schedule not found" });
@@ -522,7 +533,7 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
           ...(notificationConfig && { notificationConfig: notificationConfig as any }),
           ...(enabled !== undefined && { enabled }),
         },
-        include: { test: true },
+        include: { E2ETest: true },
       });
 
       res.json(updated);

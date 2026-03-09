@@ -192,9 +192,9 @@ export async function getUnapprovedDiffs(
   return prisma.e2EVisualDiff.findMany({
     where: {
       approved: false,
-      ...(testId && { run: { testId } }),
+      ...(testId && { E2ETestRun: { testId } }),
     },
-    include: { run: { include: { test: true } } },
+    include: { E2ETestRun: { include: { E2ETest: true } } },
     orderBy: { id: "desc" },
     take: 10,
   });
