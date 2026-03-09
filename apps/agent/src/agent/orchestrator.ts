@@ -1,4 +1,5 @@
 import { Stagehand } from "@browserbasehq/stagehand";
+import { PrismaClient } from "@prisma/client";
 import { AppConfig } from "../config/types.js";
 import { CostTracker } from "../cost/tracker.js";
 import { MemoryManager } from "../memory/manager.js";
@@ -18,7 +19,7 @@ import {
 } from "./modes.js";
 import { extractPostCommandLearnings, runLearn } from "./learning.js";
 import { runSmartChat, runChat, addToHistory } from "./chat.js";
-import { parseE2ETestFromConversation, createE2ETestViaAPI } from "./e2e-creator.js";
+import { parseE2ETestFromConversation } from "./e2e-creator.js";
 import { runTest } from "./test-runner.js";
 
 export class Orchestrator {
@@ -26,17 +27,20 @@ export class Orchestrator {
   private config: AppConfig;
   private costTracker: CostTracker;
   private memory: MemoryManager;
+  private prisma: PrismaClient;
 
   constructor(
     pool: BrowserPool,
     config: AppConfig,
     costTracker: CostTracker,
     memory: MemoryManager,
+    prisma: PrismaClient,
   ) {
     this.pool = pool;
     this.config = config;
     this.costTracker = costTracker;
     this.memory = memory;
+    this.prisma = prisma;
   }
 
   /**
@@ -398,10 +402,35 @@ export class Orchestrator {
             { instruction: handoffInstruction, domain },
             this.config.generativeAiApiKey
           );
-          const result = await createE2ETestViaAPI(e2eTest);
+          
+          // Create the test directly in the database without HTTP calls
+          const normalizedSteps = e2eTest.steps.map(step => step.instruction);
+          const testDefinition = {
+            name: e2eTest.name,
+            description: e2eTest.description,
+            retryCount: e2eTest.retryCount,
+            strictnessLevel: e2eTest.strictnessLevel,
+            visualRegressionEnabled: e2eTest.visualRegressionEnabled,
+            autoApproveBaseline: e2eTest.autoApproveBaseline,
+            steps: normalizedSteps,
+          };
+
+          const created = await this.prisma.e2ETest.create({
+            data: {
+              name: e2eTest.name,
+              description: e2eTest.description,
+              domain: e2eTest.domain,
+              definition: testDefinition as any,
+              retryCount: e2eTest.retryCount,
+              strictnessLevel: e2eTest.strictnessLevel,
+              visualRegressionEnabled: e2eTest.visualRegressionEnabled,
+              autoApproveBaseline: e2eTest.autoApproveBaseline,
+            },
+          });
+
           browserResult = {
             success: true,
-            message: result.message,
+            message: `✓ E2E test "${created.name}" created successfully with ${e2eTest.steps.length} steps for domain: ${e2eTest.domain}`,
           };
         } catch (err) {
           browserResult = {

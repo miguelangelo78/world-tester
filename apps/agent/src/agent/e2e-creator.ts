@@ -107,37 +107,3 @@ Example output:
     );
   }
 }
-
-/**
- * Create E2E test via API
- */
-export async function createE2ETestViaAPI(
-  test: E2ETest,
-  apiUrl?: string
-): Promise<{ id: string; name: string; message: string }> {
-  try {
-    // Use relative URL by default (same service), or fall back to provided URL
-    const url = apiUrl ? `${apiUrl}/api/e2e/tests` : "/api/e2e/tests";
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(test),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Failed to create test");
-    }
-
-    const created = await response.json();
-    return {
-      id: created.id,
-      name: created.name,
-      message: `✓ E2E test "${created.name}" created successfully with ${test.steps.length} steps for domain: ${test.domain}`,
-    };
-  } catch (error) {
-    throw new Error(
-      `Failed to create E2E test: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}

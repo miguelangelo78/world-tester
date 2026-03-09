@@ -1,5 +1,5 @@
 import { loadConfig, AppConfig } from "./config/index.js";
-import { setupDatabase } from "./db.js";
+import { setupDatabase, default as prisma } from "./db.js";
 import { BrowserPool } from "./browser/pool.js";
 import { setPool } from "./browser/stagehand.js";
 import { CostTracker } from "./cost/tracker.js";
@@ -48,7 +48,7 @@ export async function createAgentCore(sink: OutputSink): Promise<AgentCore> {
     sink.info(`Navigated to: ${config.targetUrl}`);
   }
 
-  const orchestrator = new Orchestrator(pool, config, costTracker, memory);
+  const orchestrator = new Orchestrator(pool, config, costTracker, memory, prisma);
 
   // Load active conversation context into chat history
   const convMessages = await memory.getConversationMessages(memory.activeConversationId, 30);
