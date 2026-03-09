@@ -177,9 +177,11 @@ export class E2EScheduler {
         this.core.config,
         this.core.memory,
         this.core.costTracker,
+        this.core.pool,
         this.prisma,
         run.id,
         test.id,
+        undefined, // domain - will be resolved from stagehand
         this.sink,
       );
 

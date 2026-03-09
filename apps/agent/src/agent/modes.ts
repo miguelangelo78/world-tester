@@ -1,4 +1,4 @@
-import { Stagehand, type StagehandPage } from "@browserbasehq/stagehand";
+import { Stagehand } from "@browserbasehq/stagehand";
 import { AppConfig } from "../config/types.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { Learning, SiteKnowledge } from "../memory/types.js";
@@ -12,7 +12,11 @@ export interface ModeResult {
   actions?: unknown[];
   success: boolean;
   streamed?: boolean;
+  thinking?: string; // AI thinking process (from extended thinking models)
 }
+
+// Type for Stagehand pages
+type StagehandPage = ReturnType<Stagehand["context"]["pages"]>[number];
 
 /**
  * Returns the page Stagehand considers "active" — respects
@@ -161,6 +165,7 @@ export async function runTask(
     usage: totalUsage,
     actions: allActions,
     success: ok,
+    thinking: (result as any).thinking, // Extract thinking from CUA agent if available
   };
 }
 

@@ -5,6 +5,8 @@ import { MemoryManager } from "../memory/manager.js";
 import { CostTracker, UsageData } from "../cost/tracker.js";
 import { tagE2ELearnings, getDomainLearnings, formatLearningsContext } from "./learnings.js";
 import { checkVisualRegression } from "./visual.js";
+import { executeSmartStep } from "./step-executor.js";
+import { BrowserPool } from "../browser/pool.js";
 import type { OutputSink } from "../output-sink.js";
 
 export interface E2EStepResult {
@@ -40,6 +42,7 @@ export async function executeE2ETest(
   config: AppConfig,
   memory: MemoryManager,
   costTracker: CostTracker,
+  pool: BrowserPool,
   prisma: PrismaClient,
   runId: string,
   testId: string, // Add testId parameter for visual regression
@@ -243,18 +246,30 @@ export async function executeE2ETest(
               throw new Error(`Failed to navigate to ${url}: ${errorMsg}`);
             }
           } else {
-            // No valid URL found - use act() for natural language navigation or provide helpful error
-            sink?.info(`[Step ${stepNumber}] No URL detected in instruction, trying with Stagehand...`);
-            const actResult = await stagehand.act(normalizedInstruction);
-            if (actResult.success) {
-              result.result = actResult.message || "Navigation completed";
+            // No valid URL found - use smart routing for natural language navigation
+            sink?.info(`[Step ${stepNumber}] No URL detected in instruction, using smart routing...`);
+            const smartResult = await executeSmartStep(
+              normalizedInstruction,
+              stagehand,
+              config,
+              memory,
+              costTracker,
+              pool,
+              domain,
+              sink,
+              signal,
+            );
+            if (smartResult.success) {
+              result.result = smartResult.message || "Navigation completed";
               success = true;
-              // Estimate cost for act() call: ~200 input tokens, ~100 output tokens (Claude pricing)
-              costTracker.addTokens(200, 100);
+              // Track token usage
+              if (smartResult.usage) {
+                costTracker.addTokens(smartResult.usage.input_tokens || 0, smartResult.usage.output_tokens || 0);
+              }
             } else {
               throw new Error(
                 `Navigation instruction could not be understood: "${normalizedInstruction}"\n` +
-                `Error: ${actResult.message || "Navigation failed"}\n` +
+                `Error: ${smartResult.message || "Navigation failed"}\n` +
                 `Tip: Use a direct URL like "Navigate to https://example.com" or "Go to example.com"`
               );
             }
@@ -351,19 +366,31 @@ export async function executeE2ETest(
               // Estimate cost for extract() call: ~300 input tokens, ~150 output tokens
               costTracker.addTokens(300, 150);
             } else {
-              // If extraction returned empty or an error message, try using act() instead for boolean checks
+              // If extraction returned empty or an error message, try using smart routing instead for boolean checks
               if (isErrorMessage) {
                 sink?.info(`[Step ${stepNumber}] Extraction returned error: "${resultText}"`);
               } else {
-                sink?.info(`[Step ${stepNumber}] Extraction returned no data, trying as action...`);
+                sink?.info(`[Step ${stepNumber}] Extraction returned no data, trying with smart routing...`);
               }
-              const actResult = await stagehand.act(normalizedInstruction);
-              if (actResult.success) {
-                result.result = actResult.message || "Assertion verified";
+              const smartResult = await executeSmartStep(
+                normalizedInstruction,
+                stagehand,
+                config,
+                memory,
+                costTracker,
+                pool,
+                domain,
+                sink,
+                signal,
+              );
+              if (smartResult.success) {
+                result.result = smartResult.message || "Assertion verified";
                 success = true;
-                costTracker.addTokens(200, 100);
+                if (smartResult.usage) {
+                  costTracker.addTokens(smartResult.usage.input_tokens || 0, smartResult.usage.output_tokens || 0);
+                }
               } else {
-                throw new Error(actResult.message || "Assertion could not be verified");
+                throw new Error(smartResult.message || "Assertion could not be verified");
               }
             }
           } catch (assertError) {
@@ -375,22 +402,39 @@ export async function executeE2ETest(
             );
           }
         } else {
-          // Use act() for actions - with better error handling
+          // Use smart routing for actions - gives access to AI reasoning and learnings
           try {
-            const actResult = await stagehand.act(normalizedInstruction);
-            if (actResult.success) {
-              result.result = actResult.message || "Action completed";
+            const smartResult = await executeSmartStep(
+              normalizedInstruction,
+              stagehand,
+              config,
+              memory,
+              costTracker,
+              pool,
+              domain,
+              sink,
+              signal,
+            );
+            
+            if (smartResult.success) {
+              result.result = smartResult.message || "Action completed";
               success = true;
-              // Estimate cost for act() call: ~200 input tokens, ~100 output tokens
-              costTracker.addTokens(200, 100);
+              // Track token usage from smart execution
+              if (smartResult.usage) {
+                costTracker.addTokens(smartResult.usage.input_tokens || 0, smartResult.usage.output_tokens || 0);
+              }
+              // Show thinking if available
+              if (smartResult.thinking) {
+                sink?.info(`[Step ${stepNumber}] Thinking:\n${smartResult.thinking}`);
+              }
             } else {
-              throw new Error(actResult.message || "Action failed");
+              throw new Error(smartResult.message || "Action failed");
             }
           } catch (actError) {
             const errMsg = actError instanceof Error ? actError.message : String(actError);
             // Provide better feedback for common issues
             if (errMsg.includes("No object generated")) {
-              throw new Error(`Stagehand couldn't understand the instruction. Try simpler language like "Click the search box" or "Type hello". Original: ${normalizedInstruction}`);
+              throw new Error(`AI couldn't understand the instruction. Try simpler language like "Click the search box" or "Type hello". Original: ${normalizedInstruction}`);
             }
             throw actError;
           }
@@ -422,7 +466,15 @@ export async function executeE2ETest(
         break;
       }
     } else {
-      result.status = "passed";
+      // Validate that successful steps have a result - don't allow null results
+      if (!result.result || (typeof result.result === "string" && result.result.trim() === "")) {
+        result.status = "failed";
+        result.error = "Step completed but returned no result. This may indicate the action did not execute properly.";
+        failedSteps++;
+        sink?.error(`Step ${stepNumber} failed: No result returned`);
+      } else {
+        result.status = "passed";
+      }
     }
 
     result.durationMs = Date.now() - stepStart;

@@ -300,6 +300,7 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
             core.config,
             core.memory,
             core.costTracker,
+            core.pool,
             prisma,
             run.id,
             test.id, // Pass testId
@@ -357,14 +358,22 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
             },
           });
         } finally {
-          // Close and remove the dedicated E2E browser instance from the pool
-          try {
-            const browserName = `e2e-${run.id}`;
-            await core.pool.despawn(browserName);
-            console.log(`[E2E] Despawned browser instance for test ${id}`);
-          } catch (closeErr) {
-            console.error(`[E2E] Error despawning browser instance:`, closeErr);
-          }
+          // Keep browser open for inspection for 30 seconds after test completes
+          // This allows users to inspect the final state of the test
+          const keepAliveMs = 30000; // 30 seconds
+          const browserName = `e2e-${run.id}`;
+          
+          console.log(`[E2E] Test run ${run.id} completed. Browser will remain open for ${keepAliveMs / 1000}s for inspection...`);
+          
+          // Close browser after delay
+          setTimeout(async () => {
+            try {
+              await core.pool.despawn(browserName);
+              console.log(`[E2E] Despawned browser instance for test ${id}`);
+            } catch (closeErr) {
+              console.error(`[E2E] Error despawning browser instance:`, closeErr);
+            }
+          }, keepAliveMs);
         }
       })();
 
