@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Wand2, Loader } from "lucide-react";
+import { getApiUrl } from "@/config/api";
 
 interface StepGeneratorProps {
   prompt: string;
@@ -27,7 +28,10 @@ export const E2EStepGenerator: React.FC<StepGeneratorProps> = ({
     setError(null);
 
     try {
-      const response = await fetch("/api/e2e/generate-steps", {
+      const apiUrl = getApiUrl("/api/e2e/generate-steps");
+      console.log("[E2E] Generating steps, API URL:", apiUrl);
+      
+      const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt }),
