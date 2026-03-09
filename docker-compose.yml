@@ -12,9 +12,9 @@ services:
       TARGET_URL: ${TARGET_URL:-}
       VNC: ${VNC:-false}
       AGENT_MODE: ${AGENT_MODE:-cli}
-      AGENT_PORT: 3100
+      AGENT_PORT: ${AGENT_PORT:-3100}
     ports:
-      - "3100:3100"
+      - "${AGENT_PORT:-3100}:${AGENT_PORT:-3100}"
       - "5900:5900"
       - "5901:5901"
     volumes:
@@ -29,12 +29,12 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         WEB_PORT: ${WEB_PORT:-3000}
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3100}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${AGENT_PORT:-3100}}
     environment:
       PORT: ${WEB_PORT:-3000}
-      NEXT_PUBLIC_AGENT_WS_URL: ${NEXT_PUBLIC_AGENT_WS_URL:-ws://localhost:3100}
+      NEXT_PUBLIC_AGENT_WS_URL: ${NEXT_PUBLIC_AGENT_WS_URL:-ws://localhost:${AGENT_PORT:-3100}}
       NEXT_PUBLIC_VNC_WS_URL: ${NEXT_PUBLIC_VNC_WS_URL:-ws://localhost:5901}
-      NEXT_PUBLIC_AGENT_HTTP_URL: ${NEXT_PUBLIC_AGENT_HTTP_URL:-http://localhost:3100}
+      NEXT_PUBLIC_AGENT_HTTP_URL: ${NEXT_PUBLIC_AGENT_HTTP_URL:-http://localhost:${AGENT_PORT:-3100}}
     ports:
       - "${WEB_PORT:-3000}:${WEB_PORT:-3000}"
     depends_on:
