@@ -24,23 +24,30 @@ export async function generateE2ESteps(
             {
               parts: [
                 {
-                  text: `You are an expert QA automation engineer. Based on the following requirement, generate a list of realistic, executable E2E test steps that an automated test should perform.
+                  text: `You are an expert QA automation engineer. Generate clear, simple E2E test steps for a browser automation AI.
 
 Requirement: "${prompt}"
 
+IMPORTANT RULES:
+- Use simple, direct language - avoid complex sentences
+- Each step should be ONE action only
+- Use simple verbs: click, fill, type, navigate, wait, verify, check, look for
+- Be specific about targets: "Click the Login button" not "Click on what appears to be a login button"
+- Keep instructions under 20 words each
+- Focus on observable user actions, not internal states
+
 Think about:
-1. What pages or screens need to be navigated to
-2. What user interactions are needed (clicks, form fills, selections)
-3. What assertions or verifications should be done
-4. Edge cases or error scenarios if relevant
+1. Navigation: Where should the browser go first?
+2. Interactions: What clicks, forms, and selections are needed?
+3. Verifications: What text or elements should be visible after each action?
 
-Return ONLY a valid JSON array of objects with "instruction" field. Each instruction should be a single, clear, actionable step that can be performed by a browser automation tool. Keep instructions concise but specific.
-
-Format:
+Return ONLY valid JSON array with "instruction" field. Example:
 [
-  { "instruction": "Navigate to the homepage" },
-  { "instruction": "Click on the login link" },
-  { "instruction": "Enter email in the email field" }
+  { "instruction": "Navigate to https://example.com" },
+  { "instruction": "Click the Login button" },
+  { "instruction": "Type user@example.com in the email field" },
+  { "instruction": "Click the Submit button" },
+  { "instruction": "Verify the Dashboard title is visible" }
 ]`,
                 },
               ],

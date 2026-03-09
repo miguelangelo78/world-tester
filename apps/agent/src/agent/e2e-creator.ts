@@ -32,39 +32,39 @@ export async function parseE2ETestFromConversation(
   const client = new GoogleGenerativeAI(apiKey);
   const model = client.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-  const prompt = `You are a QA expert. Convert the following test description into a structured E2E test.
+  const prompt = `You are a QA expert creating clear, executable E2E test steps.
 
-User's test description: "${request.instruction}"
+Test description: "${request.instruction}"
 Target domain: "${request.domain || "unknown"}"
 
-Respond with a JSON object (no markdown, just raw JSON) with this structure:
+Generate a JSON object with this structure (no markdown):
 {
-  "name": "Descriptive test name (2-5 words)",
+  "name": "Short name (2-5 words)",
   "description": "What this test verifies (1 sentence)",
   "steps": [
-    "Step 1 in natural language",
-    "Step 2 in natural language",
-    "etc..."
+    "Step text here",
+    "..."
   ]
 }
 
-Guidelines:
-- Name should be concise and descriptive
-- Steps should be clear, actionable browser commands
-- Include at least "Navigate to..." as the first step if no URL is specified
-- Steps should be in logical order
-- Each step should be a complete action (click button, verify text, enter credentials, etc.)
+CRITICAL RULES FOR STEPS:
+- Use simple, direct language only
+- Each step = ONE action (click, fill, type, navigate, wait, verify, check)
+- Be specific: "Click the Login button" not "Click the login button if it exists"
+- Under 20 words per step
+- Start with verbs: click, fill, type, navigate, wait, verify, scroll, hover, select, press
 
-Example output:
+Example:
 {
-  "name": "Login and dashboard verification",
-  "description": "Verifies users can log in and reach the dashboard",
+  "name": "Login flow",
+  "description": "Tests user login process",
   "steps": [
-    "Navigate to the homepage",
-    "Click the login button",
-    "Enter username and password",
-    "Click submit",
-    "Verify the dashboard page loads"
+    "Navigate to https://example.com/login",
+    "Type user@example.com in the email field",
+    "Type password123 in the password field",
+    "Click the Login button",
+    "Verify Welcome message is visible",
+    "Verify Dashboard page loaded"
   ]
 }`;
 
