@@ -89,6 +89,8 @@ export default function E2EPage() {
         : getApiUrl(`/api/e2e/tests`);
 
       const method = currentState.testId ? "PUT" : "POST";
+      
+      console.log("[E2E] Saving test:", { url, method, test });
 
       const response = await fetch(url, {
         method,
@@ -96,12 +98,15 @@ export default function E2EPage() {
         body: JSON.stringify(test),
       });
 
-      if (!response.ok) throw new Error("Failed to save test");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to save test (${response.status})`);
+      }
       success("Test saved successfully", "Your test has been saved and is ready to use");
       setNavigationHistory([{ view: "dashboard", testId: null }]);
     } catch (err) {
       console.error("Error saving test:", err);
-      error("Failed to save test", "Could not save your test. Please try again");
+      error("Failed to save test", err instanceof Error ? err.message : "Could not save your test. Please try again");
     }
   };
 

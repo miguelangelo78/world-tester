@@ -50,8 +50,8 @@ export const E2EDashboard: React.FC<E2EDashboardProps> = ({
       try {
         // Fetch tests, optionally filtered by selected domain
         const testsUrl = selectedDomain 
-          ? `/api/e2e/tests?domain=${encodeURIComponent(selectedDomain)}`
-          : "/api/e2e/tests";
+          ? getApiUrl(`/api/e2e/tests?domain=${encodeURIComponent(selectedDomain)}`)
+          : getApiUrl("/api/e2e/tests");
         
         const response = await fetch(testsUrl);
         if (!response.ok) throw new Error("Failed to fetch tests");
