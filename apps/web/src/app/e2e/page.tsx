@@ -6,6 +6,7 @@ import { ChevronLeft } from "lucide-react";
 import { E2EDashboard } from "@/components/e2e-dashboard";
 import { E2ETestDesigner, type E2ETestDesignerProps } from "@/components/e2e-test-designer";
 import { useNotification } from "@/components/notification-provider";
+import { getApiUrl } from "@/config/api";
 
 type View = "dashboard" | "designer";
 type TestDefinition = Parameters<E2ETestDesignerProps["onSave"]>[0];
@@ -45,7 +46,7 @@ export default function E2EPage() {
 
   const handleRunTest = async (testId: string) => {
     try {
-      const response = await fetch(`/api/e2e/tests/${testId}/run`, {
+      const response = await fetch(getApiUrl(`/api/e2e/tests/${testId}/run`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
@@ -66,7 +67,7 @@ export default function E2EPage() {
 
   const handleDeleteTest = async (testId: string) => {
     try {
-      const response = await fetch(`http://localhost:3100/api/e2e/tests/${testId}`, {
+      const response = await fetch(getApiUrl(`/api/e2e/tests/${testId}`), {
         method: "DELETE",
       });
       if (!response.ok) throw new Error("Failed to delete test");
@@ -84,8 +85,8 @@ export default function E2EPage() {
   const handleSaveTest = async (test: TestDefinition) => {
     try {
       const url = currentState.testId
-        ? `/api/e2e/tests/${currentState.testId}`
-        : `/api/e2e/tests`;
+        ? getApiUrl(`/api/e2e/tests/${currentState.testId}`)
+        : getApiUrl(`/api/e2e/tests`);
 
       const method = currentState.testId ? "PUT" : "POST";
 

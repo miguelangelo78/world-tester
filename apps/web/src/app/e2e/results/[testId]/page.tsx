@@ -4,6 +4,7 @@ import { use } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { E2EResultsViewer } from "@/components/e2e-results-viewer";
+import { getApiUrl } from "@/config/api";
 
 interface ResultsPageProps {
   params: Promise<{
@@ -17,7 +18,7 @@ export default function ResultsPage({ params }: ResultsPageProps) {
 
   const handleRerun = async (testId: string) => {
     try {
-      const response = await fetch(`/api/e2e/tests/${testId}/run`, {
+      const response = await fetch(getApiUrl(`/api/e2e/tests/${testId}/run`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });

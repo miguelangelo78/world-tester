@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Download, ChevronDown, ChevronUp, CheckCircle, XCircle, Clock, Play, Loader } from "lucide-react";
 import { E2EBrowserViewer } from "./e2e-browser-viewer";
 import { useNotification } from "./notification-provider";
+import { getApiUrl } from "@/config/api";
 
 interface TestStep {
   stepNumber: number;
@@ -68,7 +69,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
 
   const fetchPredefinedSteps = async () => {
     try {
-      const response = await fetch(`/api/e2e/tests/${testId}`);
+      const response = await fetch(getApiUrl(`/api/e2e/tests/${testId}`));
       if (!response.ok) return;
       const data = await response.json();
       setPredefinedSteps(
@@ -83,7 +84,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
     try {
       // Fetch all runs for the test
       const response = await fetch(
-        `/api/e2e/tests/${testId}/results?limit=50`
+        getApiUrl(`/api/e2e/tests/${testId}/results?limit=50`)
       );
       if (!response.ok) {
         if (response.status === 404) {
@@ -213,7 +214,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
   const handleExport = async (format: "json" | "pdf" | "html") => {
     try {
       const response = await fetch(
-        `/api/e2e/tests/${testId}/export?format=${format}`
+        getApiUrl(`/api/e2e/tests/${testId}/export?format=${format}`)
       );
       if (!response.ok) throw new Error("Export failed");
 

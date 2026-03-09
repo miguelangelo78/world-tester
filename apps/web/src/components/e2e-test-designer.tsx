@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { Trash2, Plus, ArrowUp, ArrowDown, Copy } from "lucide-react";
 import { E2EStepGenerator } from "./e2e-step-generator";
 import { useNotification } from "./notification-provider";
+import { getApiUrl } from "@/config/api";
 
 interface TestStep {
   id: string;
@@ -92,7 +93,7 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
     if (testId) {
       const fetchTest = async () => {
         try {
-          const response = await fetch(`/api/e2e/tests/${testId}`);
+          const response = await fetch(getApiUrl(`/api/e2e/tests/${testId}`));
           if (!response.ok) throw new Error("Failed to fetch test");
           const data = await response.json();
           console.log("[E2E Designer] API Response:", data);

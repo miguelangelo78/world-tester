@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Play, Edit, Trash2, Clock, BarChart3, Search, Loader, Globe, X } from "lucide-react";
+import { getApiUrl } from "@/config/api";
 
 interface TestMetrics {
   id: string;
@@ -100,7 +101,7 @@ export const E2EDashboard: React.FC<E2EDashboardProps> = ({
     // Fetch available domains (only on initial load or when no domain is selected)
     const fetchDomains = async () => {
       try {
-        const response = await fetch("/api/e2e/domains");
+        const response = await fetch(getApiUrl("/api/e2e/domains"));
         if (!response.ok) throw new Error("Failed to fetch domains");
         const data = await response.json();
         const domains = Array.isArray(data.domains) ? data.domains.filter((d: any) => d) : [];
