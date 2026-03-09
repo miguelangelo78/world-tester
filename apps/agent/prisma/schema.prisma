@@ -1,39 +1,183 @@
-datasource db {
-  provider = "postgresql"
-}
-
 generator client {
   provider = "prisma-client-js"
 }
 
-model SiteKnowledge {
-  id              String   @id @default(cuid())
-  domain          String   @unique
-  lastUpdated     DateTime @updatedAt
-  siteDescription String?
-  techStack       String[]
-  authMethod      String?
-  pages           Json     @default("{}")
-  siteMap         String[]
-  commonFlows     String[]
-  knownIssues     String[]
-  tips            String[]
+datasource db {
+  provider = "postgresql"
 }
 
-model TaskRecord {
-  id          String   @id
-  timestamp   DateTime
-  command     String
-  instruction String
-  mode        String
-  domain      String?
-  steps       String[]
-  outcome     String
-  result      String?
-  durationMs  Int
-  costUsd     Float
-  tokensIn    Int
-  tokensOut   Int
+model BillingLedger {
+  id                String   @id @default("singleton")
+  cycleStart        DateTime
+  cycleDayOfMonth   Int      @default(1)
+  totalCostUsd      Float    @default(0)
+  totalInputTokens  Int      @default(0)
+  totalOutputTokens Int      @default(0)
+  sessionCount      Int      @default(0)
+  lastUpdated       DateTime
+}
+
+model Conversation {
+  id        String   @id
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  status    String   @default("active")
+  domain    String?
+}
+
+model ConversationMessage {
+  id             String   @id
+  conversationId String
+  timestamp      DateTime @default(now())
+  role           String
+  type           String
+  content        String
+  mode           String?
+  costUsd        Float?
+  commandId      String?
+
+  @@index([conversationId, timestamp])
+}
+
+model E2ELearning {
+  id         String   @id
+  learningId String
+  testRunId  String
+  testId     String
+  createdAt  DateTime @default(now())
+
+  @@unique([learningId, testRunId])
+  @@index([testId, createdAt])
+}
+
+model E2EScheduledJob {
+  id                 String       @id
+  testId             String       @unique
+  cronSchedule       String
+  notificationConfig Json?
+  enabled            Boolean      @default(true)
+  lastRunAt          DateTime?
+  nextRunAt          DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime
+  E2ETest            E2ETest      @relation(fields: [testId], references: [id], onDelete: Cascade)
+  E2ETestRun         E2ETestRun[]
+}
+
+model E2ETest {
+  id                      String              @id
+  name                    String
+  description             String?
+  domain                  String
+  definition              Json
+  scope                   String              @default("global")
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime
+  versionNumber           Int                 @default(1)
+  isActive                Boolean             @default(true)
+  retryCount              Int                 @default(2)
+  strictnessLevel         String              @default("medium")
+  setupSteps              Json?
+  teardownSteps           Json?
+  timeout                 Int                 @default(300000)
+  visualRegressionEnabled Boolean             @default(true)
+  autoApproveBaseline     Boolean             @default(false)
+  visualFuzzyThreshold    Float               @default(0.98)
+  notifyOnFailure         String[]            @default([])
+  notifyOnSuccess         Boolean             @default(false)
+  cronSchedule            String?
+  nextScheduledRun        DateTime?
+  lastScheduledRun        DateTime?
+  useStoredProfile        Boolean             @default(false)
+  E2EScheduledJob         E2EScheduledJob?
+  E2ETestRun              E2ETestRun[]
+  E2ETestVersion          E2ETestVersion[]
+  E2EVisualBaseline       E2EVisualBaseline[]
+
+  @@index([cronSchedule])
+  @@index([domain])
+  @@index([scope, isActive])
+}
+
+model E2ETestRun {
+  id              String           @id
+  testId          String
+  isScheduled     Boolean          @default(false)
+  scheduledJobId  String?
+  status          String           @default("running")
+  verdict         String?
+  passedRetry     Int?
+  startedAt       DateTime         @default(now())
+  completedAt     DateTime?
+  durationMs      Int?
+  errorMessage    String?
+  costUsd         Float            @default(0)
+  E2EScheduledJob E2EScheduledJob? @relation(fields: [scheduledJobId], references: [id])
+  E2ETest         E2ETest          @relation(fields: [testId], references: [id], onDelete: Cascade)
+  E2ETestStep     E2ETestStep[]
+  E2EVisualDiff   E2EVisualDiff[]
+
+  @@index([status])
+  @@index([testId, startedAt])
+}
+
+model E2ETestStep {
+  id           String     @id
+  runId        String
+  stepNumber   Int
+  instruction  String
+  status       String
+  result       String?
+  screenshot   String?
+  durationMs   Int?
+  errorMessage String?
+  retryCount   Int        @default(0)
+  E2ETestRun   E2ETestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, stepNumber])
+}
+
+model E2ETestVersion {
+  id           String   @id
+  testId       String
+  version      Int
+  definition   Json
+  createdAt    DateTime @default(now())
+  changedBy    String?
+  changeReason String?
+  E2ETest      E2ETest  @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@unique([testId, version])
+  @@index([testId])
+}
+
+model E2EVisualBaseline {
+  id             String    @id
+  testId         String
+  stepNumber     Int
+  screenshotPath String
+  createdAt      DateTime  @default(now())
+  approvedAt     DateTime?
+  approvedBy     String?
+  E2ETest        E2ETest   @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@unique([testId, stepNumber])
+  @@index([testId])
+}
+
+model E2EVisualDiff {
+  id           String     @id
+  runId        String
+  stepNumber   Int
+  baselinePath String
+  currentPath  String
+  diffPath     String
+  similarity   Float
+  approved     Boolean    @default(false)
+  E2ETestRun   E2ETestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
 }
 
 model Learning {
@@ -60,19 +204,38 @@ model SessionEntry {
   @@index([sessionId])
 }
 
-model BillingLedger {
-  id                String   @id @default("singleton")
-  cycleStart        DateTime
-  cycleDayOfMonth   Int      @default(1)
-  totalCostUsd      Float    @default(0)
-  totalInputTokens  Int      @default(0)
-  totalOutputTokens Int      @default(0)
-  sessionCount      Int      @default(0)
-  lastUpdated       DateTime @updatedAt
+model SiteKnowledge {
+  id              String   @id
+  domain          String   @unique
+  lastUpdated     DateTime
+  siteDescription String?
+  techStack       String[]
+  authMethod      String?
+  pages           Json     @default("{}")
+  siteMap         String[]
+  commonFlows     String[]
+  knownIssues     String[]
+  tips            String[]
+}
+
+model TaskRecord {
+  id          String   @id
+  timestamp   DateTime
+  command     String
+  instruction String
+  mode        String
+  domain      String?
+  steps       String[]
+  outcome     String
+  result      String?
+  durationMs  Int
+  costUsd     Float
+  tokensIn    Int
+  tokensOut   Int
 }
 
 model TestReport {
-  id         String   @id @default(cuid())
+  id         String   @id
   title      String
   timestamp  DateTime
   domain     String
@@ -81,194 +244,4 @@ model TestReport {
   summary    String
   durationMs Int
   costUsd    Float
-}
-
-model Conversation {
-  id        String   @id @default(cuid())
-  title     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  status    String   @default("active")
-  domain    String?
-}
-
-model ConversationMessage {
-  id             String   @id @default(cuid())
-  conversationId String
-  timestamp      DateTime @default(now())
-  role           String
-  type           String
-  content        String
-  mode           String?
-  costUsd        Float?
-  commandId      String?
-
-  @@index([conversationId, timestamp])
-}
-
-// ── E2E Test Models ────────────────────────────────────────────────
-
-model E2ETest {
-  id                String                @id @default(cuid())
-  name              String
-  description       String?
-  domain            String                // The target domain for this test (e.g., "example.com")
-  definition        Json                  // YAML steps as JSON
-  scope             String                @default("global") // "global" or project-scoped
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  versionNumber     Int                   @default(1)
-  isActive          Boolean               @default(true)
-  
-  // Configuration
-  retryCount        Int                   @default(2)
-  strictnessLevel   String                @default("medium") // "low", "medium", "high"
-  setupSteps        Json?                 // Pre-test setup steps
-  teardownSteps     Json?                 // Post-test cleanup steps
-  timeout           Int                   @default(300000) // ms
-  
-  // Visual regression config
-  visualRegressionEnabled Boolean          @default(true)
-  autoApproveBaseline     Boolean          @default(false)
-  visualFuzzyThreshold    Float            @default(0.98) // 0-1
-  
-  // Notification config
-  notifyOnFailure   String[]              @default([]) // "email", "slack", "webhook"
-  notifyOnSuccess   Boolean               @default(false)
-  
-  // Scheduling
-  cronSchedule      String?               // e.g. "0 */6 * * *" for every 6 hours
-  nextScheduledRun  DateTime?
-  lastScheduledRun  DateTime?
-  
-  runs              E2ETestRun[]
-  versions          E2ETestVersion[]
-  visualBaselines   E2EVisualBaseline[]
-  scheduledJobs     E2EScheduledJob[]
-  
-  @@index([domain])
-  @@index([scope, isActive])
-  @@index([cronSchedule])
-}
-
-model E2ETestVersion {
-  id        String   @id @default(cuid())
-  testId    String
-  test      E2ETest  @relation(fields: [testId], references: [id], onDelete: Cascade)
-  version   Int
-  definition Json   // Snapshot of test at this version
-  createdAt DateTime @default(now())
-  changedBy String?
-  changeReason String?
-  
-  @@unique([testId, version])
-  @@index([testId])
-}
-
-model E2ETestRun {
-  id            String              @id @default(cuid())
-  testId        String
-  test          E2ETest             @relation(fields: [testId], references: [id], onDelete: Cascade)
-  
-  // Scheduled execution tracking
-  isScheduled   Boolean             @default(false)
-  scheduledJobId String?
-  scheduledJob  E2EScheduledJob?    @relation(fields: [scheduledJobId], references: [id], onDelete: SetNull)
-  
-  status        String              @default("running") // "running", "passed", "failed", "skipped"
-  verdict       String?             // "pass", "fail", "aborted"
-  passedRetry   Int?                // Which retry it passed on (null if first try)
-  
-  startedAt     DateTime            @default(now())
-  completedAt   DateTime?
-  durationMs    Int?
-  
-  errorMessage  String?
-  costUsd       Float               @default(0)
-  
-  steps         E2ETestStep[]
-  visualDiffs   E2EVisualDiff[]
-  
-  @@index([testId, startedAt])
-  @@index([status])
-}
-
-model E2ETestStep {
-  id        String        @id @default(cuid())
-  runId     String
-  run       E2ETestRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
-  
-  stepNumber  Int
-  instruction String      // The natural language step
-  status      String      // "running", "passed", "failed", "skipped"
-  
-  result      String?     // Output/evidence
-  screenshot  String?     // Path or URL to screenshot
-  durationMs  Int?
-  
-  errorMessage String?
-  retryCount  Int         @default(0)
-  
-  @@index([runId, stepNumber])
-}
-
-model E2EVisualBaseline {
-  id        String    @id @default(cuid())
-  testId    String
-  test      E2ETest   @relation(fields: [testId], references: [id], onDelete: Cascade)
-  
-  stepNumber Int
-  screenshotPath String // Path to baseline screenshot
-  createdAt DateTime  @default(now())
-  approvedAt DateTime?
-  approvedBy String?
-  
-  @@unique([testId, stepNumber])
-  @@index([testId])
-}
-
-model E2EVisualDiff {
-  id        String      @id @default(cuid())
-  runId     String
-  run       E2ETestRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
-  
-  stepNumber Int
-  baselinePath String
-  currentPath String
-  diffPath   String      // Screenshot showing diff
-  
-  similarity Float       // 0-1, how similar baseline and current are
-  approved   Boolean     @default(false)
-  
-  @@index([runId])
-}
-
-model E2EScheduledJob {
-  id        String    @id @default(cuid())
-  testId    String    @unique
-  test      E2ETest   @relation(fields: [testId], references: [id], onDelete: Cascade)
-  cronSchedule String
-  notificationConfig Json?   // { emailEnabled, emailAddresses[], slackEnabled, slackWebhook, webhookEnabled, webhookUrl }
-  enabled   Boolean   @default(true)
-  
-  runs      E2ETestRun[]
-  
-  lastRunAt DateTime?
-  nextRunAt DateTime?
-  
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-}
-
-// Tag learnings that come from e2e tests
-model E2ELearning {
-  id           String   @id @default(cuid())
-  learningId   String   // Reference to Learning model
-  testRunId    String
-  testId       String
-  
-  createdAt    DateTime @default(now())
-  
-  @@unique([learningId, testRunId])
-  @@index([testId, createdAt])
 }

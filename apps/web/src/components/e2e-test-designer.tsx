@@ -19,6 +19,7 @@ interface TestDefinition {
   strictnessLevel: "low" | "medium" | "high";
   visualRegressionEnabled: boolean;
   autoApproveBaseline: boolean;
+  useStoredProfile: boolean; // Use stored browser profile with cookies/login
   cronSchedule?: string;
   notificationConfig?: {
     emailEnabled: boolean;
@@ -141,6 +142,7 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
             strictnessLevel: data.strictnessLevel || "high",
             visualRegressionEnabled: data.visualRegressionEnabled !== false,
             autoApproveBaseline: data.autoApproveBaseline || false,
+            useStoredProfile: data.useStoredProfile === true,
             cronSchedule: data.cronSchedule || undefined,
             notificationConfig: data.notificationConfig || {
               emailEnabled: false,
@@ -173,6 +175,7 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
         strictnessLevel: "high",
         visualRegressionEnabled: true,
         autoApproveBaseline: false,
+        useStoredProfile: false,
         notificationConfig: {
           emailEnabled: false,
           emailAddresses: [],
@@ -402,6 +405,17 @@ export const E2ETestDesigner: React.FC<E2ETestDesignerProps> = ({
             />
             <span className="text-sm font-medium text-foreground">Auto-Approve Baseline</span>
           </label>
+
+          <label className="flex items-center gap-2 py-2">
+            <input
+              type="checkbox"
+              checked={test?.useStoredProfile || false}
+              onChange={(e) => updateTest((prev) => ({ ...prev, useStoredProfile: e.target.checked }))}
+              className="w-4 h-4 accent-primary"
+            />
+            <span className="text-sm font-medium text-foreground">Use Stored Browser Profile</span>
+          </label>
+          <p className="text-xs text-muted-foreground mt-1 mb-2">Load cookies and login data from stored profile (disable to start fresh)</p>
         </div>
       </div>
 

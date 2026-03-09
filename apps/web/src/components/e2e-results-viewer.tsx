@@ -9,7 +9,8 @@ interface TestStep {
   instruction: string;
   status: "passed" | "failed" | "skipped";
   result?: string;
-  screenshot?: string;
+  screenshot?: string; // After screenshot
+  screenshotBefore?: string; // Before screenshot
   durationMs: number;
   errorMessage?: string;
   retryCount: number;
@@ -640,7 +641,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
                               <p className="text-xs text-muted-foreground mb-2 font-medium">Before</p>
                               <div className="border border-border rounded bg-muted overflow-hidden">
                                 <img
-                                  src={run ? `/api/e2e/steps/${run.id}/${executedStep.stepNumber}/screenshot?type=before` : "#"}
+                                  src={executedStep.screenshotBefore ? `/api/screenshots?path=${encodeURIComponent(executedStep.screenshotBefore)}` : "#"}
                                   alt={`Step ${stepNum} - Before`}
                                   className="max-w-full h-auto"
                                   onError={(e) => {
@@ -656,7 +657,7 @@ export const E2EResultsViewer: React.FC<E2EResultsViewerProps> = ({
                               <p className="text-xs text-muted-foreground mb-2 font-medium">After</p>
                               <div className="border border-border rounded bg-muted overflow-hidden">
                                 <img
-                                  src={run ? `/api/e2e/steps/${run.id}/${executedStep.stepNumber}/screenshot?type=after` : "#"}
+                                  src={executedStep.screenshot ? `/api/screenshots?path=${encodeURIComponent(executedStep.screenshot)}` : "#"}
                                   alt={`Step ${stepNum} - After`}
                                   className="max-w-full h-auto"
                                   onError={(e) => {

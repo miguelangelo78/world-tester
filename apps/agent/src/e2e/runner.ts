@@ -8,6 +8,8 @@ import { checkVisualRegression } from "./visual.js";
 import { executeSmartStep } from "./step-executor.js";
 import { BrowserPool } from "../browser/pool.js";
 import type { OutputSink } from "../output-sink.js";
+import * as path from "path";
+import * as fs from "fs";
 
 export interface E2EStepResult {
   stepNumber: number;
@@ -17,7 +19,8 @@ export interface E2EStepResult {
   error?: string;
   retryReasons?: string[]; // Track why each retry happened
   durationMs: number;
-  screenshot?: string;
+  screenshot?: string; // After screenshot
+  screenshotBefore?: string; // Before screenshot
   retryCount: number;
 }
 
@@ -56,6 +59,13 @@ export async function executeE2ETest(
   let totalUsage: UsageData = { input_tokens: 0, output_tokens: 0 };
   let failedSteps = 0;
   let testAbortReason: string | undefined;
+  
+  // Ensure screenshots directory exists
+  // Use absolute path from project root to ensure screenshots are saved consistently
+  const screenshotsDir = path.resolve(process.cwd(), "..", "..", "data", "screenshots");
+  if (!fs.existsSync(screenshotsDir)) {
+    fs.mkdirSync(screenshotsDir, { recursive: true });
+  }
 
   // Fetch and log learnings for this domain
   let learningsContext = "";
@@ -126,12 +136,16 @@ export async function executeE2ETest(
     try {
       const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
       if (page) {
-        beforeScreenshotPath = `/tmp/e2e-${runId}-step${stepNumber}-before.png`;
+        const screenshotFilename = `e2e-${runId}-step${stepNumber}-before.png`;
+        beforeScreenshotPath = path.join(screenshotsDir, screenshotFilename);
         await page.screenshot({ path: beforeScreenshotPath });
-        sink?.info(`Before screenshot: ${beforeScreenshotPath}`);
+        result.screenshotBefore = `/screenshots/${screenshotFilename}`;
+        sink?.info(`Before screenshot: /screenshots/${screenshotFilename}`);
       }
     } catch (err) {
-      sink?.warn(`Failed to capture before screenshot for step ${stepNumber}`);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      sink?.warn(`Failed to capture before screenshot for step ${stepNumber}: ${errorMsg}`);
+      console.error(`[E2E] Before screenshot save error for step ${stepNumber}:`, err);
     }
 
     for (let attempt = 0; attempt <= (testDefinition.retryCount || 2); attempt++) {
@@ -484,10 +498,11 @@ export async function executeE2ETest(
     try {
       const page = (stagehand.context as any).activePage?.() ?? stagehand.context.pages()[0];
       if (page) {
-        const screenshotPath = `/tmp/e2e-${runId}-step${stepNumber}.png`;
+        const screenshotFilename = `e2e-${runId}-step${stepNumber}.png`;
+        const screenshotPath = path.join(screenshotsDir, screenshotFilename);
         await page.screenshot({ path: screenshotPath });
-        result.screenshot = screenshotPath;
-        sink?.info(`Screenshot: ${screenshotPath}`);
+        result.screenshot = `/screenshots/${screenshotFilename}`;
+        sink?.info(`Screenshot: /screenshots/${screenshotFilename}`);
 
         // Check visual regression against baseline if enabled
         if (testDefinition.visualRegressionEnabled) {
@@ -508,7 +523,9 @@ export async function executeE2ETest(
         }
       }
     } catch (err) {
-      sink?.warn(`Failed to capture screenshot for step ${stepNumber}`);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      sink?.warn(`Failed to capture screenshot for step ${stepNumber}: ${errorMsg}`);
+      console.error(`[E2E] Screenshot save error for step ${stepNumber}:`, err);
     }
 
     // Save step result immediately to database for live updates

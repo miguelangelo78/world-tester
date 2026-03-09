@@ -284,7 +284,9 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
       });
 
       // Create a dedicated browser instance for this E2E test run (use run ID for unique names)
-      const e2eBrowser = await core.pool.spawn(`e2e-${run.id}`);
+      // If useStoredProfile is true, use the shared profile with stored cookies/login; otherwise use an isolated profile
+      const profileOption = test.useStoredProfile ? "shared" : "isolated";
+      const e2eBrowser = await core.pool.spawn(`e2e-${run.id}`, { profile: profileOption });
       const stagehand = e2eBrowser.stagehand;
 
       // Log test details for debugging
