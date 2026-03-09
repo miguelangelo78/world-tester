@@ -16,6 +16,10 @@ export function loadConfig(): AppConfig {
     process.exit(1);
   }
 
+  // Build apiUrl from the agent server's own port
+  const agentPort = process.env.AGENT_PORT ?? "3100";
+  const apiUrl = `http://localhost:${agentPort}`;
+
   return {
     provider: "google",
     cuaModel: "google/gemini-2.5-computer-use-preview-10-2025",
@@ -25,7 +29,7 @@ export function loadConfig(): AppConfig {
     headless: process.env.HEADLESS === "true",
     targetUrl: process.env.TARGET_URL || undefined,
     dataDir: "./data",
-    apiUrl: process.env.API_URL || "http://localhost:3100",
+    apiUrl,
     viewport: { width: 1288, height: 711 },
   };
 }
