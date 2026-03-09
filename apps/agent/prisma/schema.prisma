@@ -18,16 +18,16 @@ model BillingLedger {
 }
 
 model Conversation {
-  id        String   @id
+  id        String   @id @default(cuid())
   title     String
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @default(now())
   status    String   @default("active")
   domain    String?
 }
 
 model ConversationMessage {
-  id             String   @id
+  id             String   @id @default(cuid())
   conversationId String
   timestamp      DateTime @default(now())
   role           String
@@ -66,7 +66,7 @@ model E2EScheduledJob {
 }
 
 model E2ETest {
-  id                      String              @id
+  id                      String              @id @default(cuid())
   name                    String
   description             String?
   domain                  String
@@ -123,23 +123,24 @@ model E2ETestRun {
 }
 
 model E2ETestStep {
-  id           String     @id @default(cuid())
-  runId        String
-  stepNumber   Int
-  instruction  String
-  status       String
-  result       String?
-  screenshot   String?
-  durationMs   Int?
-  errorMessage String?
-  retryCount   Int        @default(0)
-  E2ETestRun   E2ETestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  id               String     @id @default(cuid())
+  runId            String
+  stepNumber       Int
+  instruction      String
+  status           String
+  result           String?
+  screenshot       String?
+  screenshotBefore String?
+  durationMs       Int?
+  errorMessage     String?
+  retryCount       Int        @default(0)
+  E2ETestRun       E2ETestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId, stepNumber])
 }
 
 model E2ETestVersion {
-  id           String   @id
+  id           String   @id @default(cuid())
   testId       String
   version      Int
   definition   Json
@@ -181,7 +182,7 @@ model E2EVisualDiff {
 }
 
 model Learning {
-  id           String   @id
+  id           String   @id @default(cuid())
   domain       String
   category     String
   pattern      String
@@ -205,7 +206,7 @@ model SessionEntry {
 }
 
 model SiteKnowledge {
-  id              String   @id
+  id              String   @id @default(cuid())
   domain          String   @unique
   lastUpdated     DateTime
   siteDescription String?
@@ -219,7 +220,7 @@ model SiteKnowledge {
 }
 
 model TaskRecord {
-  id          String   @id
+  id          String   @id @default(cuid())
   timestamp   DateTime
   command     String
   instruction String
@@ -235,7 +236,7 @@ model TaskRecord {
 }
 
 model TestReport {
-  id         String   @id
+  id         String   @id @default(cuid())
   title      String
   timestamp  DateTime
   domain     String

@@ -52,7 +52,10 @@ export class MemoryManager {
 
   async createConversation(title?: string): Promise<ConversationInfo> {
     const row = await prisma.conversation.create({
-      data: { title: title ?? "New Conversation" },
+      data: { 
+        title: title ?? "New Conversation",
+        updatedAt: new Date(),
+      },
     });
     this._activeConversationId = row.id;
     return this.toConversationInfo(row, 0);

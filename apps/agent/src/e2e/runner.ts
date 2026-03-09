@@ -66,9 +66,9 @@ export async function executeE2ETest(
   let testAbortReason: string | undefined;
   
   // Ensure screenshots directory exists
-  // Use absolute path from agent root to ensure screenshots are saved consistently
-  // __dirname is /home/santo/DEV/world-tester/apps/agent/src/e2e (or in docker: /app/apps/agent/src/e2e)
-  const screenshotsDir = path.resolve(__dirname, "..", "..", "..", "data", "screenshots");
+  // process.cwd() returns the app root, which is /home/santo/DEV/world-tester/apps/agent (or /app/apps/agent in Docker)
+  const screenshotsDir = path.join(process.cwd(), "..", "..", "data", "screenshots");
+  console.log(`[E2E] Screenshots directory: ${screenshotsDir}`);
   if (!fs.existsSync(screenshotsDir)) {
     fs.mkdirSync(screenshotsDir, { recursive: true });
   }
@@ -144,6 +144,7 @@ export async function executeE2ETest(
       if (page) {
         const screenshotFilename = `e2e-${runId}-step${stepNumber}-before.png`;
         beforeScreenshotPath = path.join(screenshotsDir, screenshotFilename);
+        console.log(`[E2E] Saving before screenshot to: ${beforeScreenshotPath}`);
         await page.screenshot({ path: beforeScreenshotPath });
         result.screenshotBefore = `/screenshots/${screenshotFilename}`;
         sink?.info(`Before screenshot: /screenshots/${screenshotFilename}`);
@@ -525,6 +526,7 @@ export async function executeE2ETest(
       if (page) {
         const screenshotFilename = `e2e-${runId}-step${stepNumber}.png`;
         const screenshotPath = path.join(screenshotsDir, screenshotFilename);
+        console.log(`[E2E] Saving after screenshot to: ${screenshotPath}`);
         await page.screenshot({ path: screenshotPath });
         result.screenshot = `/screenshots/${screenshotFilename}`;
         sink?.info(`Screenshot: /screenshots/${screenshotFilename}`);
@@ -555,6 +557,13 @@ export async function executeE2ETest(
 
     // Save step result immediately to database for live updates
     try {
+      console.log(`[E2E] Saving step ${stepNumber} to database for run ${runId}:`, {
+        stepNumber: result.stepNumber,
+        status: result.status,
+        screenshot: result.screenshot,
+        screenshotBefore: result.screenshotBefore,
+        hasResult: !!result.result,
+      });
       await prisma.e2ETestStep.create({
         data: {
           runId: runId,
@@ -566,6 +575,7 @@ export async function executeE2ETest(
             retryReasons: result.retryReasons,
           }) : undefined,
           screenshot: result.screenshot,
+          screenshotBefore: result.screenshotBefore,
           durationMs: result.durationMs,
           errorMessage: result.error,
           retryCount: result.retryCount,
@@ -574,6 +584,7 @@ export async function executeE2ETest(
       sink?.info(`Step ${stepNumber} result saved to database`);
     } catch (dbErr) {
       sink?.warn(`Failed to save step ${stepNumber} to database: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+      console.error(`[E2E] Database error saving step ${stepNumber}:`, dbErr);
     }
   }
 

@@ -74,6 +74,7 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
           strictnessLevel: strictnessLevel || "medium",
           visualRegressionEnabled: visualRegressionEnabled !== false,
           autoApproveBaseline: autoApproveBaseline || false,
+          updatedAt: new Date(),
         },
       });
 
@@ -704,8 +705,8 @@ export function createE2ERouter(core: AgentCore, prisma: PrismaClient): Router {
         return res.status(404).json({ error: "Screenshot not found in database" });
       }
 
-      // Use __dirname from the router module location to get consistent path in Docker
-      const screenshotsDir = path.resolve(__dirname, "..", "..", "..", "data", "screenshots");
+      // Get screenshots directory - process.cwd() returns the app root
+      const screenshotsDir = path.join(process.cwd(), "..", "..", "data", "screenshots");
       let screenshotPath: string;
       
       // The stored path is the "after" screenshot

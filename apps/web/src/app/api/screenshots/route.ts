@@ -13,6 +13,8 @@ export async function GET(request: NextRequest) {
   const sanitized = path.basename(filePath);
   const fullPath = path.join(SCREENSHOTS_DIR, sanitized);
 
+  console.log(`[Screenshots API] Requested: ${filePath}, Sanitized: ${sanitized}, Full path: ${fullPath}`);
+
   // Prevent directory traversal
   if (!fullPath.startsWith(SCREENSHOTS_DIR)) {
     return NextResponse.json({ error: "Invalid path" }, { status: 403 });
@@ -29,7 +31,8 @@ export async function GET(request: NextRequest) {
         "Cache-Control": "public, max-age=31536000, immutable",
       },
     });
-  } catch {
+  } catch (error) {
+    console.log(`[Screenshots API] Error reading file ${fullPath}:`, error);
     return NextResponse.json({ error: "Screenshot not found" }, { status: 404 });
   }
 }
