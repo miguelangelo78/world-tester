@@ -253,6 +253,7 @@ export class MemoryManager {
         commonFlows: knowledge.commonFlows,
         knownIssues: knowledge.knownIssues,
         tips: knowledge.tips,
+        lastUpdated: new Date(),
       },
       create: {
         domain: knowledge.domain,
@@ -264,6 +265,7 @@ export class MemoryManager {
         commonFlows: knowledge.commonFlows,
         knownIssues: knowledge.knownIssues,
         tips: knowledge.tips,
+        lastUpdated: new Date(),
       },
     });
   }
