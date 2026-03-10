@@ -8,13 +8,13 @@ datasource db {
 
 model BillingLedger {
   id                String   @id @default("singleton")
-  cycleStart        DateTime
+  cycleStart        DateTime @default(now())
   cycleDayOfMonth   Int      @default(1)
   totalCostUsd      Float    @default(0)
   totalInputTokens  Int      @default(0)
   totalOutputTokens Int      @default(0)
   sessionCount      Int      @default(0)
-  lastUpdated       DateTime
+  lastUpdated       DateTime @default(now())
 }
 
 model Conversation {
@@ -73,7 +73,7 @@ model E2ETest {
   definition              Json
   scope                   String              @default("global")
   createdAt               DateTime            @default(now())
-  updatedAt               DateTime
+  updatedAt               DateTime            @default(now())
   versionNumber           Int                 @default(1)
   isActive                Boolean             @default(true)
   retryCount              Int                 @default(2)
@@ -188,7 +188,7 @@ model Learning {
   pattern      String
   confidence   Float
   sourceTaskId String
-  created      DateTime
+  created      DateTime @default(now())
 
   @@unique([domain, pattern])
 }
@@ -196,7 +196,7 @@ model Learning {
 model SessionEntry {
   id        Int      @id @default(autoincrement())
   sessionId String
-  timestamp DateTime
+  timestamp DateTime @default(now())
   role      String
   content   String
   mode      String?
@@ -208,7 +208,7 @@ model SessionEntry {
 model SiteKnowledge {
   id              String   @id @default(cuid())
   domain          String   @unique
-  lastUpdated     DateTime
+  lastUpdated     DateTime @default(now())
   siteDescription String?
   techStack       String[]
   authMethod      String?
@@ -221,7 +221,7 @@ model SiteKnowledge {
 
 model TaskRecord {
   id          String   @id @default(cuid())
-  timestamp   DateTime
+  timestamp   DateTime @default(now())
   command     String
   instruction String
   mode        String
@@ -238,7 +238,7 @@ model TaskRecord {
 model TestReport {
   id         String   @id @default(cuid())
   title      String
-  timestamp  DateTime
+  timestamp  DateTime @default(now())
   domain     String
   steps      Json
   verdict    String
